@@ -3,15 +3,14 @@
 
 module Version where
 
-import Data.Version (showVersion)
-import Paths_purescript as Paths
+import Data.Version (makeVersion, showVersion)
 
 #ifndef RELEASE
 import qualified Development.GitRev as GitRev
 #endif
 
 versionString :: String
-versionString = showVersion Paths.version ++ extra
+versionString = showVersion (makeVersion [0, 1, 0]) ++ extra
   where
 #ifdef RELEASE
   extra = ""

@@ -1,0 +1,44 @@
+{
+  "files.exclude": {
+    ".ghc.environment*": true,
+    ".gitattributes": true,
+    "psc-ide/": true,
+    "**/.depend": true,
+    "**/*.o": true,
+    "dist": true,
+    "dist-doctest": true,
+    "dist-newstyle": true,
+    "LICENSE": true,
+    "Setup.hs": true,
+  },
+  "debug.internalConsoleOptions": "neverOpen",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "[markdown]": {
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "bounded",
+    "editor.wordWrapColumn": 80,
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+  },
+  "[haskell]": {
+    "editor.wordWrap": "bounded",
+    "editor.wordWrapColumn": 80,
+    "editor.wrappingIndent": "deepIndent",
+  },
+  "editor.rulers": [
+    80
+  ],
+  "editor.wordWrapColumn": 80,
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "hic.executablePath": "ghcide",
+  "hic.arguments": "--lsp",
+  "search.exclude": {
+    "**/dist/": true,
+    "**/dist-doctest/": true,
+    "**/dist-newstyle/": true,
+    "**/docs/": true,
+    "**/cabal.project.freeze": true
+  }
+}

@@ -10,7 +10,7 @@ import qualified Data.Aeson as Json
 import           Data.Bool (bool)
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.ByteString.Lazy.UTF8 as LBU8
-import qualified Language.PureScript as P
+import qualified Language.PureScript.Graph as P
 import           Language.PureScript.Errors.JSON
 import qualified Options.Applicative as Opts
 import qualified System.Console.ANSI as ANSI

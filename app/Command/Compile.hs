@@ -26,6 +26,7 @@ import           System.Directory (getCurrentDirectory)
 import           System.FilePath.Glob (glob)
 import           System.IO (hPutStr, hPutStrLn, stderr)
 import           System.IO.UTF8 (readUTF8FilesT)
+import           Language.PureScript.CodeGen.Dart.Make.Actions as Dart
 
 data PSCMakeOptions = PSCMakeOptions
   { pscmInput        :: [FilePath]
@@ -58,16 +59,23 @@ compile :: PSCMakeOptions -> IO ()
 compile PSCMakeOptions{..} = do
   input <- globWarningOnMisses (unless pscmJSONErrors . warnFileTypeNotFound) pscmInput
   when (null input && not pscmJSONErrors) $ do
-    hPutStr stderr $ unlines [ "purs compile: No input files."
-                             , "Usage: For basic information, try the `--help' option."
-                             ]
+    hPutStr stderr $ unlines
+      [ "hollowpoint compile: No input files."
+      , "Usage: For basic information, try the `--help' option."
+      ]
     exitFailure
   moduleFiles <- readUTF8FilesT input
   (makeErrors, makeWarnings) <- runMake pscmOpts $ do
     ms <- CST.parseModulesFromFiles id moduleFiles
-    let filePathMap = M.fromList $ map (\(fp, pm) -> (P.getModuleName $ CST.resPartial pm, Right fp)) ms
+    let filePathMap = M.fromList $
+          map (\(fp, pm) -> (P.getModuleName $ CST.resPartial pm, Right fp)) ms
     foreigns <- inferForeignModules filePathMap
-    let makeActions = buildMakeActions pscmOutputDir filePathMap foreigns pscmUsePrefix
+    let makeActions =
+          Dart.backendMakeActions
+            pscmOutputDir
+            filePathMap
+            foreigns
+            pscmUsePrefix
     P.make makeActions (map snd ms)
   printWarningsAndErrors (P.optionsVerboseErrors pscmOpts) pscmJSONErrors makeWarnings makeErrors
   exitSuccess

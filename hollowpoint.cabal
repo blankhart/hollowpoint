@@ -1,0 +1,155 @@
+cabal-version:       >=1.10
+name:                hollowpoint
+version:             0.1.0
+license:             BSD3
+author:              blankhart
+category:            Compiler, Purescript
+synopsis:            Dart backend for Purescript.
+build-type:          Simple
+stability:           Experimental
+
+library purescript-dart
+  exposed-modules:
+    Language.PureScript.CodeGen.Dart
+-- FIXME: Move to other-modules, exporting only what app needs
+    Language.PureScript.CodeGen.Dart.CoreImp
+    Language.PureScript.CodeGen.Dart.CoreImp.AST
+    Language.PureScript.CodeGen.Dart.Common
+    Language.PureScript.CodeGen.Dart.Make.Actions
+    Language.PureScript.CodeGen.Dart.Printer
+    Language.PureScript.CodeGen.Dart.String
+  other-modules:
+  build-depends:
+      base >=4.11 && < 5
+    , base-compat
+    , aeson
+    , containers
+    , directory
+    , filepath
+-- FIXME: this dependency should not be required.
+--    , language-javascript
+    , mtl
+    , pattern-arrows
+    , prettyprinter
+    , process
+    , protolude
+    , purescript == 0.13.6
+    , recursion-schemes
+    , safe
+    , sourcemap
+    , text
+    , time
+    , transformers
+  hs-source-dirs:
+    src
+  default-language:
+    Haskell2010
+  default-extensions:
+    -- ApplicativeDo
+    -- AutoDeriveTypeable
+    BangPatterns
+    ConstraintKinds
+    DataKinds
+    DefaultSignatures
+    DeriveAnyClass
+    DeriveDataTypeable
+    DeriveFoldable
+    DeriveFunctor
+    DeriveGeneric
+    -- DeriveLift
+    DeriveTraversable
+    -- DerivingStrategies
+    DerivingVia
+    EmptyCase
+    EmptyDataDecls
+    ExplicitForAll
+    ExtendedDefaultRules
+    FlexibleContexts
+    FlexibleInstances
+    FunctionalDependencies
+    GADTs
+    InstanceSigs
+    KindSignatures
+    LambdaCase
+    MultiParamTypeClasses
+    MultiWayIf
+    NoImplicitPrelude
+    OverloadedStrings
+    PatternSynonyms
+    RankNTypes
+    ScopedTypeVariables
+    StandaloneDeriving
+    -- StrictData
+    TemplateHaskell
+    TupleSections
+    TypeApplications
+    TypeFamilies
+    TypeOperators
+    ViewPatterns
+  ghc-options:
+    -Wall
+
+executable hollowpoint
+  main-is:
+    Main.hs
+  other-modules:
+    Command.Bundle
+    Command.Compile
+    Command.Docs
+    Command.Docs.Html
+    Command.Docs.Markdown
+--    Command.Graph
+    Command.Hierarchy
+    Command.Ide
+    Command.Publish
+    Command.REPL
+    Version
+  hs-source-dirs:
+    app
+  ghc-options:
+    -Wall
+    -O2
+    -fno-warn-unused-do-bind
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+  build-depends:
+      base >=4.11 && < 5
+    , base-compat
+    , optparse-applicative
+    , aeson
+    , aeson-pretty
+    , ansi-terminal
+    , ansi-wl-pprint
+    , blaze-html
+    , bytestring
+    , containers
+    , directory
+    , file-embed
+    , filepath
+    , gitrev
+    , Glob
+    , haskeline
+    , http-types
+    , monad-logger
+    , mtl
+    , network >= 3.0.1.1
+    , optparse-applicative >=0.13.0
+    , process
+    , protolude
+    , purescript
+    , purescript-dart
+    , sourcemap
+    , stm
+    , text
+    , time
+    , transformers
+    , utf8-string
+    , wai ==3.*
+    , wai-websockets ==3.*
+    , warp ==3.*
+    , websockets >=0.9 && <0.13
+
+  default-language:
+    Haskell2010
+
