@@ -1,35 +1,18 @@
-dist
+# build
+**/dist
+**/dist-newstyle/
 cabal-dev
 .cabal-sandbox
 cabal.sandbox.config
-dist-newstyle/
 cabal.project.local*
-*.o
-*.hi
-*.chi
-*.chs.h
-*.lksh*
-.virthualenv
-.psci_modules/
-.test_modules/
-bower_components/
-node_modules
-tmp/
-.stack-work/
-output
-tests/purs/docs/docs/
-core-tests/full-core-docs.md
-tests/support/package-lock.json
-.psc-ide-port
-.psc-package/
-purescript.cabal
-tags
-TAGS
 
-# Profiling related
+# profiling
 *.aux
 *.hp
 *.prof
 *.ps
 *.svg
-tests/purs/make/
+
+# project
+example/output/
+tmp/

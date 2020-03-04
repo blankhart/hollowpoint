@@ -6,6 +6,9 @@ module Language.PureScript.CodeGen.Dart.Printer
 
 import Prelude.Compat
 
+-- FIXME: Remove, but note absence of exhaustivity checks with this API.
+import Debug.Trace (traceShow)
+
 import Control.Arrow ((<+>))
 import Control.Monad (forM, mzero)
 import Control.Monad.State (StateT, evalStateT)
@@ -34,20 +37,28 @@ literals = mkPattern' match'
   match' js = (addMapping' (getSourceSpan js) <>) <$> match js
 
   match :: (Emit gen) => AST -> StateT PrinterState Maybe gen
+
   match (NumericLiteral _ n) = return $ emit $ T.pack $ either show show n
+
   match (StringLiteral _ s) = return $ emit $ Dart.prettyPrintString s
+
   match (BooleanLiteral _ True) = return $ emit "true"
+
   match (BooleanLiteral _ False) = return $ emit "false"
+
   match (ArrayLiteral _ xs) = mconcat <$> sequence
     [ return $ emit "[ "
     , intercalate (emit ", ") <$> forM xs prettyPrintJS'
     , return $ emit " ]"
     ]
-  match (ObjectLiteral _ []) = return $ emit "{}"
-  match (ObjectLiteral _ ps) = mconcat <$> sequence
+
+  match (RecordLiteral _ []) = return $ emit "{}"
+
+  match (RecordLiteral _ ps) = mconcat <$> sequence
     [ return $ emit "{\n"
     , withIndent $ do
-        jss <- forM ps $ \(key, value) -> fmap ((objectPropertyToString key <> emit ": ") <>) . prettyPrintJS' $ value
+        jss <- forM ps $ \(key, value) ->
+          fmap ((toRecordKey key <> emit ": ") <>) . prettyPrintJS' $ value
         indentString <- currentIndent
         return $ intercalate (emit ",\n") $ map (indentString <>) jss
     , return $ emit "\n"
@@ -55,13 +66,15 @@ literals = mkPattern' match'
     , return $ emit "}"
     ]
     where
-    objectPropertyToString :: (Emit gen) => PSString -> gen
-    objectPropertyToString s =
-      emit $ case decodeString s of
-        Just s' | isValidJsIdentifier s' ->
-          s'
-        _ ->
-          Dart.prettyPrintString s
+    toRecordKey :: (Emit gen) => PSString -> gen
+    toRecordKey s = emit "'" <> emit key <> emit "'"
+      where
+      -- TODO: Review whether the identifier restriction is needed
+      -- if these are Map<String, dynamic>
+      key = case decodeString s of
+        Just s' | isValidJsIdentifier s' -> s'
+        _ -> Dart.prettyPrintString s
+
   match (Block _ sts) = mconcat <$> sequence
     [ return $ emit "{\n"
     , withIndent $ prettyStatements sts
@@ -69,22 +82,32 @@ literals = mkPattern' match'
     , currentIndent
     , return $ emit "}"
     ]
+
   match (Var _ ident) = return $ emit ident
+
   match (VariableIntroduction _ ident value) = mconcat <$> sequence
-    [ return $ emit $ "var " <> ident
+    [ return $ emit $ case value of
+        -- This is just because the Dart analyzer cannot infer the type of
+        -- a block-bodied function.  The Dart common front end is said to have
+        -- this capability.
+        Just (Function _ _ _ _) -> "final dynamic " <> ident
+        _ -> "final " <> ident
     , maybe (return mempty) (fmap (emit " = " <>) . prettyPrintJS') value
     ]
+
   match (Assignment _ target value) = mconcat <$> sequence
     [ prettyPrintJS' target
     , return $ emit " = "
     , prettyPrintJS' value
     ]
+
   match (While _ cond sts) = mconcat <$> sequence
     [ return $ emit "while ("
     , prettyPrintJS' cond
     , return $ emit ") "
     , prettyPrintJS' sts
     ]
+
   match (For _ ident start end sts) = mconcat <$> sequence
     [ return $ emit $ "for (var " <> ident <> " = "
     , prettyPrintJS' start
@@ -93,12 +116,14 @@ literals = mkPattern' match'
     , return $ emit $ "; " <> ident <> "++) "
     , prettyPrintJS' sts
     ]
+
   match (ForIn _ ident obj sts) = mconcat <$> sequence
     [ return $ emit $ "for (var " <> ident <> " in "
     , prettyPrintJS' obj
     , return $ emit ") "
     , prettyPrintJS' sts
     ]
+
   match (IfElse _ cond thens elses) = mconcat <$> sequence
     [ return $ emit "if ("
     , prettyPrintJS' cond
@@ -106,21 +131,28 @@ literals = mkPattern' match'
     , prettyPrintJS' thens
     , maybe (return mempty) (fmap (emit " else " <>) . prettyPrintJS') elses
     ]
+
   match (Return _ value) = mconcat <$> sequence
     [ return $ emit "return "
     , prettyPrintJS' value
     ]
+
   match (ReturnNoResult _) = return $ emit "return"
+
   match (Throw _ value) = mconcat <$> sequence
     [ return $ emit "throw "
     , prettyPrintJS' value
     ]
+
   match (Comment _ com js) = mconcat <$> sequence
     [ return $ emit "\n"
     , mconcat <$> forM com comment
     , prettyPrintJS' js
     ]
+
+  -- NOTE: This can produce an infinite loop if it fails to match.
   match _ = mzero
+  -- match q = traceShow q $ mzero
 
   comment :: (Emit gen) => Comment -> StateT PrinterState Maybe gen
   comment (LineComment com) = fmap mconcat $ sequence $
@@ -150,19 +182,32 @@ literals = mkPattern' match'
           Just (x, xs) -> x `T.cons` removeComments xs
           Nothing -> ""
 
-accessor :: Pattern PrinterState AST (Text, AST)
-accessor = mkPattern match
+-- FIXME
+recordAccessor :: Pattern PrinterState AST (Text, AST)
+recordAccessor = mkPattern match
   where
-  match (Indexer _ (StringLiteral _ prop) val) =
+  match (RecordAccessor _ (StringLiteral _ prop) val) =
     case decodeString prop of
       Just s | isValidJsIdentifier s -> Just (s, val)
       _ -> Nothing
   match _ = Nothing
 
+objectAccessor :: Pattern PrinterState AST (Text, AST)
+objectAccessor = mkPattern match
+  where
+  match (ObjectAccessor _ (StringLiteral _ prop) val) =
+    case decodeString prop of
+      Just s | isValidJsIdentifier s -> Just (s, val)
+      _ -> Nothing
+  match _ = Nothing
+
+-- FIXME
 indexer :: (Emit gen) => Pattern PrinterState AST (gen, AST)
 indexer = mkPattern' match
   where
-  match (Indexer _ index val) = (,) <$> prettyPrintJS' index <*> pure val
+  match (ArrayIndexer _ index val) = (,) <$> prettyPrintJS' index <*> pure val
+  match (RecordAccessor _ index val) = (,) <$> prettyPrintJS' index <*> pure val
+  match (ObjectAccessor _ index val) = (,) <$> prettyPrintJS' index <*> pure val
   match _ = mzero
 
 lam :: Pattern PrinterState AST ((Maybe Text, [Text], Maybe SourceSpan), AST)
@@ -179,10 +224,10 @@ app = mkPattern' match
     return (intercalate (emit ", ") jss, val)
   match _ = mzero
 
-instanceOf :: Pattern PrinterState AST (AST, AST)
-instanceOf = mkPattern match
+is :: Pattern PrinterState AST (AST, AST)
+is = mkPattern match
   where
-  match (InstanceOf _ val ty) = Just (val, ty)
+  match (Is _ val ty) = Just (val, ty)
   match _ = Nothing
 
 unary' :: (Emit gen) => UnaryOperator -> (AST -> Text) -> Operator PrinterState AST gen
@@ -235,15 +280,19 @@ prettyPrintJS' = A.runKleisli $ runPattern matchValue
   matchValue = buildPrettyPrinter operators (literals <+> fmap parensPos matchValue)
   operators :: (Emit gen) => OperatorTable PrinterState AST gen
   operators =
-    OperatorTable [ [ Wrap indexer $ \index val -> val <> emit "[" <> index <> emit "]" ]
-                  , [ Wrap accessor $ \prop val -> val <> emit "." <> emit prop ]
-                  , [ Wrap app $ \args val -> val <> emit "(" <> args <> emit ")" ]
-                  , [ unary New "new " ]
-                  , [ Wrap lam $ \(name, args, ss) ret -> addMapping' ss <>
-                      emit ("function "
-                        <> fromMaybe "" name
-                        <> "(" <> intercalate ", " args <> ") ")
-                        <> ret ]
+    OperatorTable [ [ Wrap indexer $ \index val ->
+                        val <> emit "[" <> index <> emit "]" ]
+                  , [ Wrap recordAccessor $ \prop val ->
+                        val <> emit "['" <> emit prop <> emit "']" ]
+                  , [ Wrap objectAccessor $ \prop val ->
+                        val <> emit "." <> emit prop ]
+                  , [ Wrap app $ \args val ->
+                        val <> emit "(" <> args <> emit ")" ]
+                  , [ Wrap lam $ \(name, args, ss) ret ->
+                        addMapping' ss <>
+                          emit (fromMaybe "" name
+                          <> "(" <> intercalate ", " args <> ") ")
+                          <> ret ]
                   , [ unary     Not                  "!"
                     , unary     BitwiseNot           "~"
                     , unary     Positive             "+"
@@ -260,9 +309,9 @@ prettyPrintJS' = A.runKleisli $ runPattern matchValue
                     , binary    LessThanOrEqualTo    "<="
                     , binary    GreaterThan          ">"
                     , binary    GreaterThanOrEqualTo ">="
-                    , AssocR instanceOf $ \v1 v2 -> v1 <> emit " instanceof " <> v2 ]
-                  , [ binary    EqualTo              "==="
-                    , binary    NotEqualTo           "!==" ]
+                    , AssocR is $ \v1 v2 -> v1 <> emit " is " <> v2 ]
+                  , [ binary    EqualTo              "=="
+                    , binary    NotEqualTo           "!=" ]
                   , [ binary    BitwiseAnd           "&" ]
                   , [ binary    BitwiseXor           "^" ]
                   , [ binary    BitwiseOr            "|" ]

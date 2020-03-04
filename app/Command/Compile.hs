@@ -26,7 +26,9 @@ import           System.Directory (getCurrentDirectory)
 import           System.FilePath.Glob (glob)
 import           System.IO (hPutStr, hPutStrLn, stderr)
 import           System.IO.UTF8 (readUTF8FilesT)
+
 import           Language.PureScript.CodeGen.Dart.Make.Actions as Dart
+import           Language.PureScript.CodeGen.Dart.Make.Foreigns as Dart
 
 data PSCMakeOptions = PSCMakeOptions
   { pscmInput        :: [FilePath]
@@ -69,7 +71,7 @@ compile PSCMakeOptions{..} = do
     ms <- CST.parseModulesFromFiles id moduleFiles
     let filePathMap = M.fromList $
           map (\(fp, pm) -> (P.getModuleName $ CST.resPartial pm, Right fp)) ms
-    foreigns <- inferForeignModules filePathMap
+    foreigns <- Dart.inferForeignModules filePathMap
     let makeActions =
           Dart.backendMakeActions
             pscmOutputDir
@@ -77,11 +79,15 @@ compile PSCMakeOptions{..} = do
             foreigns
             pscmUsePrefix
     P.make makeActions (map snd ms)
-  printWarningsAndErrors (P.optionsVerboseErrors pscmOpts) pscmJSONErrors makeWarnings makeErrors
+  printWarningsAndErrors
+    (P.optionsVerboseErrors pscmOpts)
+    pscmJSONErrors
+    makeWarnings
+    makeErrors
   exitSuccess
 
 warnFileTypeNotFound :: String -> IO ()
-warnFileTypeNotFound = hPutStrLn stderr . ("purs compile: No files found using pattern: " ++)
+warnFileTypeNotFound = hPutStrLn stderr . ("hollowpoint compile: No files found using pattern: " ++)
 
 globWarningOnMisses :: (String -> IO ()) -> [FilePath] -> IO [FilePath]
 globWarningOnMisses warn = concatMapM globWithWarning

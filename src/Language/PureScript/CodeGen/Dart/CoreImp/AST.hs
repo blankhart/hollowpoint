@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 -- | Data types for the imperative core Dart AST
 module Language.PureScript.CodeGen.Dart.CoreImp.AST where
 
@@ -18,7 +20,6 @@ data UnaryOperator
   | Not
   | BitwiseNot
   | Positive
-  | New
   deriving (Show, Eq)
 
 -- | Built-in binary operators
@@ -58,10 +59,16 @@ data AST
   -- ^ A binary operator application
   | ArrayLiteral (Maybe SourceSpan) [AST]
   -- ^ An array literal
-  | Indexer (Maybe SourceSpan) AST AST
+  | ArrayIndexer (Maybe SourceSpan) AST AST
   -- ^ An array indexer expression
-  | ObjectLiteral (Maybe SourceSpan) [(PSString, AST)]
-  -- ^ An object literal
+  | RecordLiteral (Maybe SourceSpan) [(PSString, AST)]
+  -- ^ A record literal
+  | RecordAccessor (Maybe SourceSpan) AST AST
+  -- ^ A record accessor expression (map key)
+  | ObjectAccessor (Maybe SourceSpan) AST AST
+  -- ^ An object accessor expression (class instance variable)
+  -- | ClassDeclaration (Maybe SourceSpan) ClassDeclarationType PSString [Text]
+  -- ^ A class declaration (name, extends, fields)
   | Function (Maybe SourceSpan) (Maybe Text) [Text] AST
   -- ^ A function introduction (optional name, arguments, body)
   | App (Maybe SourceSpan) AST [AST]
@@ -88,11 +95,21 @@ data AST
   -- ^ Return statement with no return value
   | Throw (Maybe SourceSpan) AST
   -- ^ Throw statement
-  | InstanceOf (Maybe SourceSpan) AST AST
-  -- ^ instanceof check
+  | Is (Maybe SourceSpan) AST AST
+  -- ^ is check
   | Comment (Maybe SourceSpan) [Comment] AST
   -- ^ Commented JavaScript
   deriving (Show, Eq)
+
+data ClassDeclarationType
+  = AbstractClass Text
+  | ConcreteClass Text
+
+pattern IntegerLiteral :: (Maybe SourceSpan) -> Integer -> AST
+pattern IntegerLiteral ss i = NumericLiteral ss (Left i)
+
+pattern DoubleLiteral :: (Maybe SourceSpan) -> Double -> AST
+pattern DoubleLiteral ss n = NumericLiteral ss (Right n)
 
 withSourceSpan :: SourceSpan -> AST -> AST
 withSourceSpan withSpan = go where
@@ -106,8 +123,10 @@ withSourceSpan withSpan = go where
   go (Unary _ op j) = Unary ss op j
   go (Binary _ op j1 j2) = Binary ss op j1 j2
   go (ArrayLiteral _ js) = ArrayLiteral ss js
-  go (Indexer _ j1 j2) = Indexer ss j1 j2
-  go (ObjectLiteral _ js) = ObjectLiteral ss js
+  go (ArrayIndexer _ j1 j2) = ArrayIndexer ss j1 j2
+  go (RecordLiteral _ js) = RecordLiteral ss js
+  go (RecordAccessor _ j1 j2) = RecordAccessor ss j1 j2
+  go (ObjectAccessor _ j1 j2) = ObjectAccessor ss j1 j2
   go (Function _ name args j) = Function ss name args j
   go (App _ j js) = App ss j js
   go (Var _ s) = Var ss s
@@ -121,7 +140,7 @@ withSourceSpan withSpan = go where
   go (Return _ js) = Return ss js
   go (ReturnNoResult _) = ReturnNoResult ss
   go (Throw _ js) = Throw ss js
-  go (InstanceOf _ j1 j2) = InstanceOf ss j1 j2
+  go (Is _ j1 j2) = Is ss j1 j2
   go (Comment _ com j) = Comment ss com j
 
 getSourceSpan :: AST -> Maybe SourceSpan
@@ -133,8 +152,10 @@ getSourceSpan = go where
   go (Unary ss _ _) = ss
   go (Binary ss _ _ _) = ss
   go (ArrayLiteral ss _) = ss
-  go (Indexer ss _ _) = ss
-  go (ObjectLiteral ss _) = ss
+  go (ArrayIndexer ss _ _) = ss
+  go (RecordLiteral ss _) = ss
+  go (RecordAccessor ss _ _) = ss
+  go (ObjectAccessor ss _ _) = ss
   go (Function ss _ _ _) = ss
   go (App ss _ _) = ss
   go (Var ss _) = ss
@@ -148,7 +169,7 @@ getSourceSpan = go where
   go (Return ss _) = ss
   go (ReturnNoResult ss) = ss
   go (Throw ss _) = ss
-  go (InstanceOf ss _ _) = ss
+  go (Is ss _ _) = ss
   go (Comment ss _ _) = ss
 
 everywhere :: (AST -> AST) -> AST -> AST
@@ -157,8 +178,10 @@ everywhere f = go where
   go (Unary ss op j) = f (Unary ss op (go j))
   go (Binary ss op j1 j2) = f (Binary ss op (go j1) (go j2))
   go (ArrayLiteral ss js) = f (ArrayLiteral ss (map go js))
-  go (Indexer ss j1 j2) = f (Indexer ss (go j1) (go j2))
-  go (ObjectLiteral ss js) = f (ObjectLiteral ss (map (fmap go) js))
+  go (ArrayIndexer ss j1 j2) = f (ArrayIndexer ss (go j1) (go j2))
+  go (RecordLiteral ss js) = f (RecordLiteral ss (map (fmap go) js))
+  go (RecordAccessor ss j1 j2) = f (RecordAccessor ss (go j1) (go j2))
+  go (ObjectAccessor ss j1 j2) = f (ObjectAccessor ss (go j1) (go j2))
   go (Function ss name args j) = f (Function ss name args (go j))
   go (App ss j js) = f (App ss (go j) (map go js))
   go (Block ss js) = f (Block ss (map go js))
@@ -170,7 +193,7 @@ everywhere f = go where
   go (IfElse ss j1 j2 j3) = f (IfElse ss (go j1) (go j2) (fmap go j3))
   go (Return ss js) = f (Return ss (go js))
   go (Throw ss js) = f (Throw ss (go js))
-  go (InstanceOf ss j1 j2) = f (InstanceOf ss (go j1) (go j2))
+  go (Is ss j1 j2) = f (Is ss (go j1) (go j2))
   go (Comment ss com j) = f (Comment ss com (go j))
   go other = f other
 
@@ -183,8 +206,10 @@ everywhereTopDownM f = f >=> go where
   go (Unary ss op j) = Unary ss op <$> f' j
   go (Binary ss op j1 j2) = Binary ss op <$> f' j1 <*> f' j2
   go (ArrayLiteral ss js) = ArrayLiteral ss <$> traverse f' js
-  go (Indexer ss j1 j2) = Indexer ss <$> f' j1 <*> f' j2
-  go (ObjectLiteral ss js) = ObjectLiteral ss <$> traverse (sndM f') js
+  go (ArrayIndexer ss j1 j2) = ArrayIndexer ss <$> f' j1 <*> f' j2
+  go (RecordLiteral ss js) = RecordLiteral ss <$> traverse (sndM f') js
+  go (RecordAccessor ss j1 j2) = RecordAccessor ss <$> f' j1 <*> f' j2
+  go (ObjectAccessor ss j1 j2) = ObjectAccessor ss <$> f' j1 <*> f' j2
   go (Function ss name args j) = Function ss name args <$> f' j
   go (App ss j js) = App ss <$> f' j <*> traverse f' js
   go (Block ss js) = Block ss <$> traverse f' js
@@ -196,7 +221,7 @@ everywhereTopDownM f = f >=> go where
   go (IfElse ss j1 j2 j3) = IfElse ss <$> f' j1 <*> f' j2 <*> traverse f' j3
   go (Return ss j) = Return ss <$> f' j
   go (Throw ss j) = Throw ss <$> f' j
-  go (InstanceOf ss j1 j2) = InstanceOf ss <$> f' j1 <*> f' j2
+  go (Is ss j1 j2) = Is ss <$> f' j1 <*> f' j2
   go (Comment ss com j) = Comment ss com <$> f' j
   go other = f other
 
@@ -205,8 +230,10 @@ everything (<>.) f = go where
   go j@(Unary _ _ j1) = f j <>. go j1
   go j@(Binary _ _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(ArrayLiteral _ js) = foldl (<>.) (f j) (map go js)
-  go j@(Indexer _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(ObjectLiteral _ js) = foldl (<>.) (f j) (map (go . snd) js)
+  go j@(ArrayIndexer _ j1 j2) = f j <>. go j1 <>. go j2
+  go j@(RecordLiteral _ js) = foldl (<>.) (f j) (map (go . snd) js)
+  go j@(RecordAccessor _ j1 j2) = f j <>. go j1 <>. go j2
+  go j@(ObjectAccessor _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(Function _ _ _ j1) = f j <>. go j1
   go j@(App _ j1 js) = foldl (<>.) (f j <>. go j1) (map go js)
   go j@(Block _ js) = foldl (<>.) (f j) (map go js)
@@ -219,6 +246,6 @@ everything (<>.) f = go where
   go j@(IfElse _ j1 j2 (Just j3)) = f j <>. go j1 <>. go j2 <>. go j3
   go j@(Return _ j1) = f j <>. go j1
   go j@(Throw _ j1) = f j <>. go j1
-  go j@(InstanceOf _ j1 j2) = f j <>. go j1 <>. go j2
+  go j@(Is _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(Comment _ _ j1) = f j <>. go j1
   go other = f other

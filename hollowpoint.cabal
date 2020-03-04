@@ -16,9 +16,11 @@ library purescript-dart
     Language.PureScript.CodeGen.Dart.CoreImp.AST
     Language.PureScript.CodeGen.Dart.Common
     Language.PureScript.CodeGen.Dart.Make.Actions
+    Language.PureScript.CodeGen.Dart.Make.Foreigns
     Language.PureScript.CodeGen.Dart.Printer
     Language.PureScript.CodeGen.Dart.String
   other-modules:
+    Paths_hollowpoint
   build-depends:
       base >=4.11 && < 5
     , base-compat
@@ -26,8 +28,6 @@ library purescript-dart
     , containers
     , directory
     , filepath
--- FIXME: this dependency should not be required.
---    , language-javascript
     , mtl
     , pattern-arrows
     , prettyprinter
@@ -103,6 +103,7 @@ executable hollowpoint
     Command.Ide
     Command.Publish
     Command.REPL
+    Paths_hollowpoint
     Version
   hs-source-dirs:
     app
