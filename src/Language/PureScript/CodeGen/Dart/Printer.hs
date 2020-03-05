@@ -7,7 +7,7 @@ module Language.PureScript.CodeGen.Dart.Printer
 import Prelude.Compat
 
 -- FIXME: Remove, but note absence of exhaustivity checks with this API.
-import Debug.Trace (traceShow)
+-- import Debug.Trace (traceShow)
 
 import Control.Arrow ((<+>))
 import Control.Monad (forM, mzero)
@@ -37,6 +37,12 @@ literals = mkPattern' match'
   match' js = (addMapping' (getSourceSpan js) <>) <$> match js
 
   match :: (Emit gen) => AST -> StateT PrinterState Maybe gen
+
+  -- FIXME: Package system, module naming, etc.
+  match (Directive _ d) = return $ case d of
+    Library lib -> emit $ "library " <> lib
+    Import lib qual -> emit $ "import \"" <> lib <> "\" as " <> qual
+    Export lib -> emit $ "export \"" <> lib <> "\""
 
   match (NumericLiteral _ n) = return $ emit $ T.pack $ either show show n
 
@@ -150,6 +156,59 @@ literals = mkPattern' match'
     , prettyPrintJS' js
     ]
 
+  -- FIXME: Ignoring superclasses (types)
+  -- return $ emit "@sealed" -- only relevant to type, not constructor
+  -- and so would decorate a parent abstract class
+  -- FIXME: Review whether nullaries should have a static member, since "const constructors" do not return constant objects (they are just capable of doing so).
+  -- FIXME: Longer-term, possible use of enums for appropriate types.
+  match (ClassDeclaration _ (ConcreteClass c) _ fields) =
+    mconcat <$> sequence
+      [ return $ emit ("class " <> c <> " {\n")
+      , withIndent $ do
+          i <- currentIndent
+          mconcat <$> sequence
+            [ return $ mconcat $ flip fmap fields $ \field ->
+              i <> emit ("final dynamic " <> field <> ";\n")
+            , let initializers = intercalate ", " (fmap ("this." <>) fields)
+              in  return $
+                    i <> emit "const " <> emit (c <> "(" <> initializers <> ");\n")
+            -- The curried constructor, i.e.
+            {-
+                static dynamic create = (value0) {
+                  return (value1) {
+                    return ExampleTermB(value0, value1);
+                  };
+                };
+            -}
+            {- , if null fields
+                then return $ emit ""
+                else do
+                  curried <- forM fields $ \field -> withIndent $ do
+                    inner <- currentIndent
+                    let arg = "(" <> field <> ")"
+                        body = " {\n" <> inner <> "return " <> "#rec" <>  "};"
+                    return $ arg <> body
+                  return $
+                    i <> emit "static dynamic create = " <> (mconcat $ emit <$> curried)
+            -}
+            , let
+                ind n = T.replicate n "    "
+                call = c <> "(" <> T.intercalate ", " fields <> ");\n"
+                (ctor, _) = foldr curried (call, length fields) fields
+                curried arg (acc, n) = (acc', n - 1)
+                  where
+                    acc' = "(" <> arg <> ") {\n"
+                      <> ind (n + 1) <> "return " <> acc
+                      <> ind n <> "};\n"
+              in if null fields
+                  then return $ emit ""
+                  else
+                    return $
+                      i <> emit ("static final dynamic create = " <> ctor)
+            , return $ emit "}\n"
+            ]
+      ]
+
   -- NOTE: This can produce an infinite loop if it fails to match.
   match _ = mzero
   -- match q = traceShow q $ mzero
@@ -257,6 +316,7 @@ binary op str = AssocL match (\v1 v2 -> v1 <> emit (" " <> str <> " ") <> v2)
     match' (Binary _ op' v1 v2) | op' == op = Just (v1, v2)
     match' _ = Nothing
 
+-- This adds colons after every statement.
 prettyStatements :: (Emit gen) => [AST] -> StateT PrinterState Maybe gen
 prettyStatements sts = do
   jss <- forM sts prettyPrintJS'

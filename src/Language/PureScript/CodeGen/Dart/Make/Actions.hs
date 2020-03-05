@@ -47,9 +47,6 @@ import           Language.PureScript.CodeGen.Dart.Make.Foreigns as Dart
 import           Language.PureScript.CodeGen.Dart.Printer as Dart
 import qualified Language.PureScript.CodeGen.Dart.CoreImp as Dart
 
--- TODO: Eliminate dependency on AST
-import qualified Language.PureScript.CodeGen.Dart.CoreImp.AST as Imp
-
 -- | Render a progress message
 renderProgressMessage :: ProgressMessage -> String
 renderProgressMessage (CompilingModule mn) =
@@ -128,13 +125,8 @@ backendMakeActions outputDir filePathMap foreigns usePrefix =
     when (S.member JS codegenTargets) $ do
       foreignInclude <- case mn `M.lookup` foreigns of
         Just _
-          | not $ requiresForeign m -> do
-              return Nothing
-          | otherwise -> do
-              return $ Just $
-                Imp.App Nothing
-                  (Imp.Var Nothing "require")
-                  [Imp.StringLiteral Nothing "./foreign.dart"]
+          | not $ requiresForeign m -> return Nothing
+          | otherwise -> return $ Just $ "./foreign.dart"
         Nothing
           | requiresForeign m ->
               throwError . errorMessage' (CF.moduleSourceSpan m) $

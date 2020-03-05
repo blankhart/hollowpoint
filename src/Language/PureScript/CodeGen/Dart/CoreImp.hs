@@ -18,7 +18,7 @@ import Data.List ((\\))
 import qualified Data.Foldable as F
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -50,9 +50,9 @@ moduleToJs
   :: forall m
    . (Monad m, MonadReader Options m, MonadSupply m, MonadError MultipleErrors m)
   => Module Ann
-  -> Maybe AST -- The original generates AST for foreign includes
+  -> Maybe Text -- ^ Foreign includes, if any
   -> m [AST]
-moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
+moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ =
   rethrow (addHint (ErrorInModule mn)) $ do
     let usedNames = concatMap getNames decls
     let mnLookup = renameImports usedNames imports
@@ -69,12 +69,17 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
     F.traverse_ (F.traverse_ checkIntegers) optimized
     comments <- not <$> asks optionsNoComments
     --  Remove the use strict annotation and the foreign imports, and replace with a library and foreign import/re-export statement or another suitable scheme. Probably importing a child library is the easiest given namespacing restrictions.  Parallel foreign module with its own library directive.
-    let library = AST.StringLiteral Nothing "library x"
+    let library = AST.Directive Nothing (AST.Library "x")
     let header =
           if comments && not (null coms)
             then AST.Comment Nothing coms library
             else library
-    let foreign' = [ AST.VariableIntroduction Nothing "$foreign" foreign_ | not $ null foreigns || isNothing foreign_ ]
+    -- foreigns represents an AST
+    let foreign' = case foreign_ of
+          Just ffi | not (null foreigns) ->
+            [AST.Directive Nothing (AST.Import ffi "$foreign")]
+          _ ->
+            []
     return $ header : foreign' ++ jsImports ++ concat optimized
     {- Rename these with underscores
     let foreignExps = exps `intersect` foreigns
@@ -116,9 +121,7 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
   importToJs :: M.Map ModuleName (Ann, ModuleName) -> ModuleName -> m AST
   importToJs mnLookup mn' = do
     let ((ss, _, _, _), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-    let moduleBody = AST.App Nothing (AST.Var Nothing "require")
-          [AST.StringLiteral Nothing (fromString (".." </> T.unpack (runModuleName mn') </> "index.dart"))]
-    withPos ss $ AST.VariableIntroduction Nothing (moduleNameToJs mnSafe) (Just moduleBody)
+    withPos ss $ AST.Directive Nothing (AST.Import (fromString (".." </> T.unpack (runModuleName mn') </> "index.dart")) (moduleNameToJs mnSafe))
 
   -- | Replaces the `ModuleName`s in the AST so that the generated code refers to
   -- the collision-avoiding renamed module imports.
@@ -155,10 +158,8 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
   bindToAst (NonRec ann ident val) = return <$> nonRecToJS ann ident val
   bindToAst (Rec vals) = forM vals (uncurry . uncurry $ nonRecToJS)
 
-  -- | Generate code in the simplified JavaScript intermediate representation for a single non-recursive
-  -- declaration.
+  -- | Generate code in the simplified JavaScript intermediate representation for a single non-recursive declaration.
   --
-  -- The main purpose of this function is to handle code generation for comments.
   nonRecToJS :: Ann -> Ident -> Expr Ann -> m AST
   nonRecToJS a i e@(extractAnn -> (_, com, _, _)) | not (null com) = do
     withoutComment <- asks optionsNoComments
@@ -167,7 +168,9 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
        else AST.Comment Nothing com <$> nonRecToJS a i (modifyAnn removeComments e)
   nonRecToJS (ss, _, _, _) ident val = do
     imp <- valueToJs val
-    withPos ss $ AST.VariableIntroduction Nothing (identToJs ident) (Just imp)
+    withPos ss $ case imp of
+      decl@(AST.ClassDeclaration _ _ _ _) -> decl
+      _ -> AST.VariableIntroduction Nothing (identToJs ident) (Just imp)
 
   withPos :: SourceSpan -> AST -> m AST
   withPos ss imp = do
@@ -214,7 +217,7 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
   valueToJs' (Literal (pos, _, _, _) l) =
     rethrowWithPosition pos $ literalToValueJS pos l
   valueToJs' (Var (_, _, _, Just (IsConstructor _ [])) name) =
-    return $ objectAccessorString "value" $ qualifiedToJS id name
+    return $ AST.App Nothing (qualifiedToJS id name) []
   valueToJs' (Var (_, _, _, Just (IsConstructor _ _)) name) =
     return $ objectAccessorString "create" $ qualifiedToJS id name
   -- FIXME: Does this discriminate sufficiently between records and objects?
@@ -247,8 +250,9 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
     args' <- mapM valueToJs args
     case f of
       Var (_, _, _, Just IsNewtype) _ -> return (head args')
-      Var (_, _, _, Just (IsConstructor _ fields)) name | length args == length fields ->
-        return $ AST.App Nothing (qualifiedToJS id name) args'
+      Var (_, _, _, Just (IsConstructor _ fields)) name
+        | length args == length fields ->
+            return $ AST.App Nothing (qualifiedToJS id name) args'
       Var (_, _, _, Just IsTypeClassConstructor) name ->
         return $ AST.App Nothing (qualifiedToJS id name) args'
       _ -> flip (foldl (\fn a -> AST.App Nothing fn [a])) args' <$> valueToJs f
@@ -277,7 +281,7 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
       (properToJs ctor)
       (Just $
         AST.RecordLiteral Nothing
-        [ ("create",  AST.Function Nothing
+        [ ("schmeate",  AST.Function Nothing
                         Nothing
                         ["value"]
                         (AST.Block Nothing
@@ -288,34 +292,14 @@ moduleToJs (Module _ coms mn _ imports exports foreigns decls) foreign_ =
 
   -- Nullary constructor
   valueToJs' (Constructor _ _ ctor []) = return $
-    (AST.Block Nothing $
-      [ AST.Function Nothing
-          (Just (properToJs ctor))
-          []
-          (AST.Block Nothing [])
-      , AST.Assignment Nothing
-          (objectAccessorString "value" (AST.Var Nothing (properToJs ctor)))
-          (AST.App Nothing (AST.Var Nothing (properToJs ctor)) [])
-      , AST.Return Nothing $ AST.Var Nothing (properToJs ctor)
-      ]
-    )
+    AST.ClassDeclaration Nothing (AST.ConcreteClass $ properToJs ctor) [] []
 
   -- N-ary constructor
-  valueToJs' (Constructor _ _ ctor fields) =
-    let constructor =
-          let body = [ AST.Assignment Nothing ((objectAccessorString $ mkString $ identToJs f) (AST.Var Nothing "this")) (var f) | f <- fields ]
-          in AST.Function Nothing (Just (properToJs ctor)) (identToJs `map` fields) (AST.Block Nothing body)
-        createFn =
-          let body = AST.App Nothing (AST.Var Nothing (properToJs ctor)) (var `map` fields)
-          in foldr (\f inner -> AST.Function Nothing Nothing [identToJs f] (AST.Block Nothing [AST.Return Nothing inner])) body fields
-    in  return $
-          AST.Block Nothing $
-            [ constructor
-            , AST.Assignment Nothing
-                (objectAccessorString "create" (AST.Var Nothing (properToJs ctor)))
-                createFn
-            , AST.Return Nothing $ AST.Var Nothing (properToJs ctor)
-            ]
+  valueToJs' (Constructor _ _ ctor fields) = return $
+    AST.ClassDeclaration Nothing
+      (AST.ConcreteClass $ properToJs ctor)
+      []
+      (identToJs <$> fields)
 
   literalToValueJS :: SourceSpan -> Literal (Expr Ann) -> m AST
   literalToValueJS ss (NumericLiteral (Left i)) = return $ AST.IntegerLiteral (Just ss) i

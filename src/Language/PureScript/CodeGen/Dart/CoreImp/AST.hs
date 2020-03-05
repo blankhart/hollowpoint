@@ -45,9 +45,11 @@ data BinaryOperator
   | ZeroFillShiftRight
   deriving (Show, Eq)
 
--- | Data type for simplified JavaScript expressions
+-- | Data type for simplified Dart expressions
 data AST
-  = NumericLiteral (Maybe SourceSpan) (Either Integer Double)
+  = Directive (Maybe SourceSpan) Directive
+  -- ^ A directive.
+  | NumericLiteral (Maybe SourceSpan) (Either Integer Double)
   -- ^ A numeric literal
   | StringLiteral (Maybe SourceSpan) PSString
   -- ^ A string literal
@@ -67,7 +69,7 @@ data AST
   -- ^ A record accessor expression (map key)
   | ObjectAccessor (Maybe SourceSpan) AST AST
   -- ^ An object accessor expression (class instance variable)
-  -- | ClassDeclaration (Maybe SourceSpan) ClassDeclarationType PSString [Text]
+  | ClassDeclaration (Maybe SourceSpan) ClassDeclarationType [Superclass] [Text]
   -- ^ A class declaration (name, extends, fields)
   | Function (Maybe SourceSpan) (Maybe Text) [Text] AST
   -- ^ A function introduction (optional name, arguments, body)
@@ -101,9 +103,23 @@ data AST
   -- ^ Commented JavaScript
   deriving (Show, Eq)
 
+data Directive
+  = Library Text
+  | Import Text Text -- ^ import "package:purescript/$1/index.dart" as $2
+  | Export Text
+  deriving (Show, Eq)
+
 data ClassDeclarationType
-  = AbstractClass Text
-  | ConcreteClass Text
+  = ConcreteClass Text
+  -- | AbstractClass Text
+  -- | Mixin
+  deriving (Show, Eq)
+
+data Superclass
+  = Extends PSString
+  | With [PSString]
+  | Implements PSString
+  deriving (Show, Eq, Ord)
 
 pattern IntegerLiteral :: (Maybe SourceSpan) -> Integer -> AST
 pattern IntegerLiteral ss i = NumericLiteral ss (Left i)
@@ -117,6 +133,7 @@ withSourceSpan withSpan = go where
   ss = Just withSpan
 
   go :: AST -> AST
+  go (Directive _ d) = Directive ss d
   go (NumericLiteral _ n) = NumericLiteral ss n
   go (StringLiteral _ s) = StringLiteral ss s
   go (BooleanLiteral _ b) = BooleanLiteral ss b
@@ -127,6 +144,7 @@ withSourceSpan withSpan = go where
   go (RecordLiteral _ js) = RecordLiteral ss js
   go (RecordAccessor _ j1 j2) = RecordAccessor ss j1 j2
   go (ObjectAccessor _ j1 j2) = ObjectAccessor ss j1 j2
+  go (ClassDeclaration _ j1 j2 j3) = ClassDeclaration ss j1 j2 j3
   go (Function _ name args j) = Function ss name args j
   go (App _ j js) = App ss j js
   go (Var _ s) = Var ss s
@@ -146,6 +164,7 @@ withSourceSpan withSpan = go where
 getSourceSpan :: AST -> Maybe SourceSpan
 getSourceSpan = go where
   go :: AST -> Maybe SourceSpan
+  go (Directive ss _) = ss
   go (NumericLiteral ss _) = ss
   go (StringLiteral ss _) = ss
   go (BooleanLiteral ss _) = ss
@@ -156,6 +175,7 @@ getSourceSpan = go where
   go (RecordLiteral ss _) = ss
   go (RecordAccessor ss _ _) = ss
   go (ObjectAccessor ss _ _) = ss
+  go (ClassDeclaration ss _ _ _) = ss
   go (Function ss _ _ _) = ss
   go (App ss _ _) = ss
   go (Var ss _) = ss
