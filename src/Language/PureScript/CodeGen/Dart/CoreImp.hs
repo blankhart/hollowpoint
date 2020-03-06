@@ -166,6 +166,20 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
     if withoutComment
        then nonRecToJS a i (modifyAnn removeComments e)
        else AST.Comment Nothing com <$> nonRecToJS a i (modifyAnn removeComments e)
+  -- Dart name collisions possible if typeclasses and data constructors have
+  -- different namespaces, but that would also be the case for JavaScript
+  -- where both are functions.
+  -- TODO: Typeclass renderings don't need the curried "create" function.
+  nonRecToJS (ss, _, _, _) ident e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) = do
+    let args = unAbs e
+    return $ AST.ClassDeclaration (Just ss)
+      (AST.ConcreteClass $ identToJs ident)
+      []
+      (map identToJs args)
+    where
+    unAbs :: Expr Ann -> [Ident]
+    unAbs (Abs _ arg val) = arg : unAbs val
+    unAbs _ = []
   nonRecToJS (ss, _, _, _) ident val = do
     imp <- valueToJs val
     withPos ss $ case imp of
@@ -220,41 +234,61 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
     return $ AST.App Nothing (qualifiedToJS id name) []
   valueToJs' (Var (_, _, _, Just (IsConstructor _ _)) name) =
     return $ objectAccessorString "create" $ qualifiedToJS id name
+  -- internalError if IsTypeClassConstructor -- should have been intercepted
+
   -- FIXME: Does this discriminate sufficiently between records and objects?
+  -- Prime case may be typeclass instance method invocations.
+  -- This could be fixed by adding a meta annotation to the Accessor
+  -- or to the Abs
+  {-
+    -- https://github.com/purescript/purescript/blob/ed5fbfb75eb7d85431591d0c889fa8ada7174fd6/src/Language/PureScript/CoreFn/Desugar.hs#L115
+    exprToCoreFn ss com ty  (A.TypeClassDictionaryAccessor _ ident) =
+        Abs (ss, com, ty, Nothing)
+          (Ident "dict")
+          (Accessor (ssAnn ss)
+            (mkString $ runIdent ident)
+            (Var (ssAnn ss) $ Qualified Nothing (Ident "dict"))
+          )
+  -}
+  valueToJs' (Abs _ (Ident "dict") (Accessor _ prop val@(Var _ (Qualified Nothing (Ident "dict"))))) = do
+    body <- objectAccessorString prop <$> valueToJs val
+    return $ AST.Function Nothing
+      Nothing
+      ["dict"]
+      (AST.Block Nothing [AST.Return Nothing body])
   valueToJs' (Accessor _ prop val) =
     recordAccessorString prop <$> valueToJs val
   valueToJs' (ObjectUpdate _ o ps) = do
     obj <- valueToJs o
     sts <- mapM (sndM valueToJs) ps
     extendObj obj sts
-  --  Essentially a factory function, returning a typeclass instance
-  --  To convert to a declaration, this would need to intercept the variable introduction so as to get the name.  The args would be dynamic instance variables declared by the class.
-  valueToJs' e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
-    let args = unAbs e
-    in return $ AST.Function Nothing Nothing (map identToJs args) (AST.Block Nothing $ map assign args)
-    where
-    unAbs :: Expr Ann -> [Ident]
-    unAbs (Abs _ arg val) = arg : unAbs val
-    unAbs _ = []
-    assign :: Ident -> AST
-    assign name = AST.Assignment Nothing (objectAccessorString (mkString $ runIdent name) (AST.Var Nothing "this"))
-                               (var name)
   valueToJs' (Abs _ arg val) = do
     ret <- valueToJs val
     let jsArg = case arg of
                   UnusedIdent -> []
                   _           -> [identToJs arg]
-    return $ AST.Function Nothing Nothing jsArg (AST.Block Nothing [AST.Return Nothing ret])
+    return $
+      AST.Function Nothing
+        Nothing
+        jsArg
+        (case ret of
+          AST.Block _ _ -> ret
+          _ -> AST.Block Nothing [AST.Return Nothing ret]
+        )
   valueToJs' e@App{} = do
     let (f, args) = unApp e []
     args' <- mapM valueToJs args
     case f of
+      --  If the function call is to a newtype constructor, inline the call with the value that is already there.
       Var (_, _, _, Just IsNewtype) _ -> return (head args')
+      --  If the function call is saturated, do not curry the call; invoke the generated constructor with all its arguments directly.
       Var (_, _, _, Just (IsConstructor _ fields)) name
         | length args == length fields ->
             return $ AST.App Nothing (qualifiedToJS id name) args'
+      --  If the function call constructs a typeclass dictionary, it will always be fully saturated.
       Var (_, _, _, Just IsTypeClassConstructor) name ->
         return $ AST.App Nothing (qualifiedToJS id name) args'
+      --  Otherwise, for a generic function, apply the call in curried fashion
       _ -> flip (foldl (\fn a -> AST.App Nothing fn [a])) args' <$> valueToJs f
     where
     unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
@@ -273,9 +307,10 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
   valueToJs' (Let _ ds val) = do
     ds' <- concat <$> mapM bindToAst ds
     ret <- valueToJs val
-    return $ AST.App Nothing (AST.Function Nothing Nothing [] (AST.Block Nothing (ds' ++ [AST.Return Nothing ret]))) []
+    return $ AST.Block Nothing (ds' ++ [AST.Return Nothing ret])
 
   -- Newtype constructor
+  -- TODO: Figure out why this gets eliminated.
   valueToJs' (Constructor (_, _, _, Just IsNewtype) _ ctor _) = return $
     AST.VariableIntroduction Nothing
       (properToJs ctor)
@@ -313,26 +348,15 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
   -- | Shallow copy an open record in an object update.
   extendObj :: AST -> [(PSString, AST)] -> m AST
   extendObj obj sts = do
-    newObj <- freshName
-    key <- freshName
-    evaluatedObj <- freshName
-    let
-      jsKey = AST.Var Nothing key
-      jsNewObj = AST.Var Nothing newObj
-      jsEvaluatedObj = AST.Var Nothing evaluatedObj
-      block = AST.Block Nothing (evaluate:objAssign:copy:extend ++ [AST.Return Nothing jsNewObj])
-      evaluate = AST.VariableIntroduction Nothing evaluatedObj (Just obj)
-      objAssign = AST.VariableIntroduction Nothing newObj (Just $ AST.RecordLiteral Nothing [])
-      copy = AST.ForIn Nothing key jsEvaluatedObj $ AST.Block Nothing [AST.IfElse Nothing cond assign Nothing]
-      cond = AST.App Nothing (objectAccessorString "call" (objectAccessorString "hasOwnProperty" (AST.RecordLiteral Nothing []))) [jsEvaluatedObj, jsKey]
-      assign = AST.Block Nothing
-        [ AST.Assignment Nothing
-            (AST.RecordAccessor Nothing jsKey jsNewObj)
-            (AST.RecordAccessor Nothing jsKey jsEvaluatedObj)
-        ]
-      stToAssign (s, imp) = AST.Assignment Nothing (recordAccessorString s jsNewObj) imp
-      extend = map stToAssign sts
-    return block
+    return $
+      AST.App Nothing
+        (objectAccessorString "addAll" $
+          (AST.App Nothing
+            (AST.Var Nothing "Map.from")
+            [obj]
+          )
+        )
+        [ AST.RecordLiteral Nothing sts ]
 
   -- | Generate code in the simplified JavaScript intermediate representation for a reference to a
   -- variable.
@@ -350,20 +374,33 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
   foreignIdent :: Ident -> AST
   foreignIdent ident = objectAccessorString (mkString $ runIdent ident) (AST.Var Nothing "$foreign")
 
-  -- | Generate code in the simplified JavaScript intermediate representation for pattern match binders
-  -- and guards.
+  -- | Generate code in the simplified JavaScript intermediate representation for pattern match binders and guards.
+  --  FIXME: This generates assignment bindings for unused variables in Dart
+  --  when unused variable bindings are generated in PureScript.  Additionally
+  --  this binds unused variables when NO unused variables are ggenerated in
+  --  PureScript.
   bindersToJs :: SourceSpan -> [CaseAlternative Ann] -> [AST] -> m AST
-  bindersToJs ss binders vals = do
+  bindersToJs _ binders vals = do
     valNames <- replicateM (length vals) freshName
     let assignments = zipWith (AST.VariableIntroduction Nothing) valNames (map Just vals)
     imps <- forM binders $ \(CaseAlternative bs result) -> do
       ret <- guardsToJs result
       go valNames ret bs
 
+    --  NOTE:
+    --  Some blocks have no return statement, since they are all in conditionals, and so need to throw a FallThroughError() as a bottom case (at least as it appears to the Dart compiler).
+    --  But other blocks necessarily have a return statement, because they catch all cases, and in that case throwing a FallThroughError() is unreachable dead code.
+    --  So exhaustivity checks would need to be repeated, at least to the extent of eliminating an AST.Throw if the immediately preceding statement is a standalone AST.Return.
+    --  Another data structure would be more efficient
+    let (stmts, exhaustiveCheck) = case concat imps of
+          [] -> ([], throwing)
+          stmts' | AST.Return _ _ <- last stmts' -> (stmts', [])
+          stmts' -> (stmts', throwing)
+        throwing = [AST.Throw Nothing fallthroughError]
     return $ AST.Block Nothing
               ( assignments
-              ++ concat imps
-              ++ [AST.Throw Nothing $ failedPatternError valNames]
+              ++ stmts
+              ++ exhaustiveCheck
               )
 
     where
@@ -374,17 +411,11 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
         binderToJs v done'' b
       go _ _ _ = internalError "Invalid arguments to bindersToJs"
 
-      failedPatternError :: [Text] -> AST
-      failedPatternError names = AST.App Nothing (AST.Var Nothing "Error") [AST.Binary Nothing AST.Add (AST.StringLiteral Nothing $ mkString failedPatternMessage) (AST.ArrayLiteral Nothing $ zipWith valueError names vals)]
-
-      failedPatternMessage :: Text
-      failedPatternMessage = "Failed pattern match at " <> runModuleName mn <> " " <> displayStartEndPos ss <> ": "
-
-      valueError :: Text -> AST -> AST
-      valueError _ l@(AST.NumericLiteral _ _) = l
-      valueError _ l@(AST.StringLiteral _ _)  = l
-      valueError _ l@(AST.BooleanLiteral _ _) = l
-      valueError s _                        = objectAccessorString "name" . objectAccessorString "constructor" $ AST.Var Nothing s
+      fallthroughError :: AST
+      fallthroughError =
+        AST.App Nothing
+          (AST.Var Nothing "FallThroughError")
+          []
 
       guardsToJs :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [AST]
       guardsToJs (Left gs) = traverse genGuard gs where
@@ -456,7 +487,12 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
       return (AST.VariableIntroduction Nothing propVar (Just (recordAccessorString prop (AST.Var Nothing varName))) : imp)
   literalToBinderJS varName done (ArrayLiteral bs) = do
     imp <- go done 0 bs
-    return [AST.IfElse Nothing (AST.Binary Nothing AST.EqualTo (objectAccessorString "length" (AST.Var Nothing varName)) (AST.NumericLiteral Nothing (Left (fromIntegral $ length bs)))) (AST.Block Nothing imp) Nothing]
+    return
+      [ AST.IfElse Nothing
+          (AST.Binary Nothing AST.EqualTo (objectAccessorString "length" (AST.Var Nothing varName))
+          (AST.NumericLiteral Nothing (Left (fromIntegral $ length bs))))
+          (AST.Block Nothing imp) Nothing
+      ]
     where
     go :: [AST] -> Integer -> [Binder Ann] -> m [AST]
     go done' _ [] = return done'

@@ -43,6 +43,7 @@ literals = mkPattern' match'
     Library lib -> emit $ "library " <> lib
     Import lib qual -> emit $ "import \"" <> lib <> "\" as " <> qual
     Export lib -> emit $ "export \"" <> lib <> "\""
+    Pragma p -> emit $ "@pragma('" <> p <> "')"
 
   match (NumericLiteral _ n) = return $ emit $ T.pack $ either show show n
 
@@ -172,25 +173,9 @@ literals = mkPattern' match'
             , let initializers = intercalate ", " (fmap ("this." <>) fields)
               in  return $
                     i <> emit "const " <> emit (c <> "(" <> initializers <> ");\n")
-            -- The curried constructor, i.e.
-            {-
-                static dynamic create = (value0) {
-                  return (value1) {
-                    return ExampleTermB(value0, value1);
-                  };
-                };
-            -}
-            {- , if null fields
-                then return $ emit ""
-                else do
-                  curried <- forM fields $ \field -> withIndent $ do
-                    inner <- currentIndent
-                    let arg = "(" <> field <> ")"
-                        body = " {\n" <> inner <> "return " <> "#rec" <>  "};"
-                    return $ arg <> body
-                  return $
-                    i <> emit "static dynamic create = " <> (mconcat $ emit <$> curried)
-            -}
+            -- The curried constructor.  Note, typeclass constructors will
+            -- always be applied fully saturated and so don't need this, even
+            -- though they take multiple arguments.
             , let
                 ind n = T.replicate n "    "
                 call = c <> "(" <> T.intercalate ", " fields <> ");\n"
@@ -205,7 +190,7 @@ literals = mkPattern' match'
                   else
                     return $
                       i <> emit ("static final dynamic create = " <> ctor)
-            , return $ emit "}\n"
+            , return $ emit "}"
             ]
       ]
 
@@ -316,12 +301,19 @@ binary op str = AssocL match (\v1 v2 -> v1 <> emit (" " <> str <> " ") <> v2)
     match' (Binary _ op' v1 v2) | op' == op = Just (v1, v2)
     match' _ = Nothing
 
--- This adds colons after every statement.
+-- This adds semicolons after every statement.
 prettyStatements :: (Emit gen) => [AST] -> StateT PrinterState Maybe gen
 prettyStatements sts = do
   jss <- forM sts prettyPrintJS'
   indentString <- currentIndent
-  return $ intercalate (emit "\n") $ map ((<> emit ";") . (indentString <>)) jss
+  let declFlags = map isDecl sts
+      isDecl (ClassDeclaration _ _ _ _) = True
+      isDecl _ = False
+      fmtStmt js decl = case decl of
+        True -> indentString <> js
+        False -> indentString <> js <> emit ";"
+  return $ intercalate (emit "\n") $
+    zipWith fmtStmt jss declFlags
 
 -- | Generate a pretty-printed string representing a collection of JavaScript expressions at the same indentation level
 prettyPrintJSWithSourceMaps :: [AST] -> (Text, [SMap])

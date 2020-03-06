@@ -24,10 +24,12 @@ type ExampleTypeSynonym =
   }
 
 class ExampleTypeclass a where
-  getNullary :: a -> ExampleNullary
+  getNullary1 :: a -> ExampleNullary
+  getNullary2 :: a -> a -> ExampleNullary
 
 instance etNewtypeInt :: ExampleTypeclass ExampleNewtypeInt where
-  getNullary _ = ExampleNullary
+  getNullary1 _ = ExampleNullary
+  getNullary2 _ _ = ExampleNullary
 
 -- Closed record update
 updateRecordClosed :: ExampleTypeSynonym -> ExampleTypeSynonym
@@ -40,8 +42,8 @@ updateRecordOpen = _ { hello = "hi" }
 -- Case statement
 doCaseMatch :: ExampleSumProduct -> String
 doCaseMatch = case _ of
-  ExampleTermA i b -> "A"
-  ExampleTermB s n -> "B"
+  ExampleTermA _ _ -> "A"
+  ExampleTermB _ _ -> "B"
 
 foreign import subtract :: Int -> Int -> Int
 

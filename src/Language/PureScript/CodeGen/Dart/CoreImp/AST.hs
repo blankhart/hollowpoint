@@ -107,6 +107,11 @@ data Directive
   = Library Text
   | Import Text Text -- ^ import "package:purescript/$1/index.dart" as $2
   | Export Text
+  -- TODO: This shouldn't be a directive, but an annotation
+  -- This will require particular subfunctions to return lists of AST
+  -- Or the AST to contain a Stmts [AST] node.
+  -- Otherwise, this could be added as a field to Function
+  | Pragma Text -- ^ @pragma
   deriving (Show, Eq)
 
 data ClassDeclarationType
