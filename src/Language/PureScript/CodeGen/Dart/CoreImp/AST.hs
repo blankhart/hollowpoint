@@ -87,8 +87,6 @@ data AST
   -- ^ While loop
   | For (Maybe SourceSpan) Text AST AST AST
   -- ^ For loop
-  | ForIn (Maybe SourceSpan) Text AST AST
-  -- ^ ForIn loop
   | IfElse (Maybe SourceSpan) AST AST (Maybe AST)
   -- ^ If-then-else statement
   | Return (Maybe SourceSpan) AST
@@ -158,7 +156,6 @@ withSourceSpan withSpan = go where
   go (Assignment _ j1 j2) = Assignment ss j1 j2
   go (While _ j1 j2) = While ss j1 j2
   go (For _ name j1 j2 j3) = For ss name j1 j2 j3
-  go (ForIn _ name j1 j2) = ForIn ss name j1 j2
   go (IfElse _ j1 j2 j3) = IfElse ss j1 j2 j3
   go (Return _ js) = Return ss js
   go (ReturnNoResult _) = ReturnNoResult ss
@@ -189,7 +186,6 @@ getSourceSpan = go where
   go (Assignment ss _ _) = ss
   go (While ss _ _) = ss
   go (For ss _ _ _ _) = ss
-  go (ForIn ss _ _ _) = ss
   go (IfElse ss _ _ _) = ss
   go (Return ss _) = ss
   go (ReturnNoResult ss) = ss
@@ -214,7 +210,6 @@ everywhere f = go where
   go (Assignment ss j1 j2) = f (Assignment ss (go j1) (go j2))
   go (While ss j1 j2) = f (While ss (go j1) (go j2))
   go (For ss name j1 j2 j3) = f (For ss name (go j1) (go j2) (go j3))
-  go (ForIn ss name j1 j2) = f (ForIn ss name (go j1) (go j2))
   go (IfElse ss j1 j2 j3) = f (IfElse ss (go j1) (go j2) (fmap go j3))
   go (Return ss js) = f (Return ss (go js))
   go (Throw ss js) = f (Throw ss (go js))
@@ -242,7 +237,6 @@ everywhereTopDownM f = f >=> go where
   go (Assignment ss j1 j2) = Assignment ss <$> f' j1 <*> f' j2
   go (While ss j1 j2) = While ss <$> f' j1 <*> f' j2
   go (For ss name j1 j2 j3) = For ss name <$> f' j1 <*> f' j2 <*> f' j3
-  go (ForIn ss name j1 j2) = ForIn ss name <$> f' j1 <*> f' j2
   go (IfElse ss j1 j2 j3) = IfElse ss <$> f' j1 <*> f' j2 <*> traverse f' j3
   go (Return ss j) = Return ss <$> f' j
   go (Throw ss j) = Throw ss <$> f' j
@@ -266,7 +260,6 @@ everything (<>.) f = go where
   go j@(Assignment _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(While _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(For _ _ j1 j2 j3) = f j <>. go j1 <>. go j2 <>. go j3
-  go j@(ForIn _ _ j1 j2) = f j <>. go j1 <>. go j2
   go j@(IfElse _ j1 j2 Nothing) = f j <>. go j1 <>. go j2
   go j@(IfElse _ j1 j2 (Just j3)) = f j <>. go j1 <>. go j2 <>. go j3
   go j@(Return _ j1) = f j <>. go j1

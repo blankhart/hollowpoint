@@ -291,3 +291,7 @@ Another question is whether the default code generation should mark the function
 ## Notes
 
 * Explore whether it is possible to provide compile-time errors using the existing typeclass infrastructure if a function is marked as intended to be tail-call optimized but the compiler is unable to perform the optimization.  This may have complicated interactions with currying, but the idea would be that applying a `TailRec =>` constraint requires each function to be either non-recursive or tail-recursive.
+
+## Frontend Changes
+
+* It would be useful if the `CoreFn.Ann.Meta` type had a field for `TypeClassAccessor`s so that backends can represent typeclasses other than as records.  For example, using native objects for sum/product types and string-keyed maps for records. The accessor would carry the type class name and would be populated in a [desugaring phase](https://github.com/purescript/purescript/blob/ed5fbfb75eb7d85431591d0c889fa8ada7174fd6/src/Language/PureScript/CoreFn/Desugar.hs#L115).

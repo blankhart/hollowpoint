@@ -124,13 +124,6 @@ literals = mkPattern' match'
     , prettyPrintJS' sts
     ]
 
-  match (ForIn _ ident obj sts) = mconcat <$> sequence
-    [ return $ emit $ "for (var " <> ident <> " in "
-    , prettyPrintJS' obj
-    , return $ emit ") "
-    , prettyPrintJS' sts
-    ]
-
   match (IfElse _ cond thens elses) = mconcat <$> sequence
     [ return $ emit "if ("
     , prettyPrintJS' cond
@@ -189,7 +182,7 @@ literals = mkPattern' match'
                   then return $ emit ""
                   else
                     return $
-                      i <> emit ("static final dynamic create = " <> ctor)
+                      i <> emit ("static dynamic get create => " <> ctor)
             , return $ emit "}"
             ]
       ]

@@ -17,6 +17,8 @@ library purescript-dart
     Language.PureScript.CodeGen.Dart.Common
     Language.PureScript.CodeGen.Dart.Make.Actions
     Language.PureScript.CodeGen.Dart.Make.Foreigns
+    Language.PureScript.CodeGen.Dart.Make.Monad
+    Language.PureScript.CodeGen.Dart.Options
     Language.PureScript.CodeGen.Dart.Printer
     Language.PureScript.CodeGen.Dart.String
   other-modules:
@@ -24,10 +26,13 @@ library purescript-dart
   build-depends:
       base >=4.11 && < 5
     , base-compat
+    , bytestring
     , aeson
+    , aeson-casing
     , containers
     , directory
     , filepath
+    , monad-control
     , mtl
     , pattern-arrows
     , prettyprinter
@@ -40,6 +45,7 @@ library purescript-dart
     , text
     , time
     , transformers
+    , transformers-base
   hs-source-dirs:
     src
   default-language:

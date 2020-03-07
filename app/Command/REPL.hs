@@ -175,6 +175,7 @@ browserBackend serverPort = Backend setup evaluate reload shutdown
         handleWebsocket pending = do
           conn <- WS.acceptRequest pending
           -- Fork a thread to keep the connection alive
+          -- TODO: Use `withPingThread` instead.
           WS.forkPingThread conn 10
           -- Clone the command channel
           cmdChanCopy <- atomically $ dupTChan cmdChan

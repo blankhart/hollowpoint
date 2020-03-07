@@ -2,8 +2,8 @@
 # Run the example
 .PHONY: example
 example :
-	rm -rf example/output/Example && \
-	cabal run hollowpoint compile example/*.purs -- -o example/output
+	rm -rf example/pkg/* && \
+	cabal run hollowpoint compile example/src/**/*.purs -- -o example/pkg
 
 # && bat example/output/Example/index.js
 

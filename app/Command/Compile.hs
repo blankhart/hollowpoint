@@ -18,7 +18,6 @@ import           Data.Traversable (for)
 import qualified Language.PureScript as P
 import qualified Language.PureScript.CST as CST
 import           Language.PureScript.Errors.JSON
-import           Language.PureScript.Make
 import qualified Options.Applicative as Opts
 import qualified System.Console.ANSI as ANSI
 import           System.Exit (exitSuccess, exitFailure)
@@ -29,13 +28,15 @@ import           System.IO.UTF8 (readUTF8FilesT)
 
 import           Language.PureScript.CodeGen.Dart.Make.Actions as Dart
 import           Language.PureScript.CodeGen.Dart.Make.Foreigns as Dart
+import           Language.PureScript.CodeGen.Dart.Make.Monad as Dart
+import qualified Language.PureScript.CodeGen.Dart.Options as Dart
 
-data PSCMakeOptions = PSCMakeOptions
-  { pscmInput        :: [FilePath]
-  , pscmOutputDir    :: FilePath
-  , pscmOpts         :: P.Options
-  , pscmUsePrefix    :: Bool
-  , pscmJSONErrors   :: Bool
+data HollowpointOptions = HollowpointOptions
+  { hpInput        :: [FilePath]
+  , hpOutputDir    :: FilePath
+  , hpOpts         :: Dart.Options
+  , hpUsePrefix    :: Bool
+  , hpJSONErrors   :: Bool
   }
 
 -- | Arguments: verbose, use JSON, warnings, errors
@@ -57,31 +58,31 @@ printWarningsAndErrors verbose True warnings errors = do
                (either (toJSONErrors verbose P.Error) (const []) errors)
   either (const exitFailure) (const (return ())) errors
 
-compile :: PSCMakeOptions -> IO ()
-compile PSCMakeOptions{..} = do
-  input <- globWarningOnMisses (unless pscmJSONErrors . warnFileTypeNotFound) pscmInput
-  when (null input && not pscmJSONErrors) $ do
+compile :: HollowpointOptions -> IO ()
+compile HollowpointOptions{..} = do
+  input <- globWarningOnMisses (unless hpJSONErrors . warnFileTypeNotFound) hpInput
+  when (null input && not hpJSONErrors) $ do
     hPutStr stderr $ unlines
       [ "hollowpoint compile: No input files."
       , "Usage: For basic information, try the `--help' option."
       ]
     exitFailure
   moduleFiles <- readUTF8FilesT input
-  (makeErrors, makeWarnings) <- runMake pscmOpts $ do
+  (makeErrors, makeWarnings) <- Dart.runMake hpOpts $ do
     ms <- CST.parseModulesFromFiles id moduleFiles
     let filePathMap = M.fromList $
           map (\(fp, pm) -> (P.getModuleName $ CST.resPartial pm, Right fp)) ms
     foreigns <- Dart.inferForeignModules filePathMap
     let makeActions =
           Dart.backendMakeActions
-            pscmOutputDir
+            hpOutputDir
             filePathMap
             foreigns
-            pscmUsePrefix
+            hpUsePrefix
     P.make makeActions (map snd ms)
   printWarningsAndErrors
-    (P.optionsVerboseErrors pscmOpts)
-    pscmJSONErrors
+    (Dart.optionsVerboseErrors hpOpts)
+    hpJSONErrors
     makeWarnings
     makeErrors
   exitSuccess
@@ -134,46 +135,46 @@ jsonErrors = Opts.switch $
      Opts.long "json-errors"
   <> Opts.help "Print errors to stderr as JSON"
 
-codegenTargets :: Opts.Parser [P.CodegenTarget]
+codegenTargets :: Opts.Parser [Dart.CodegenTarget]
 codegenTargets = Opts.option targetParser $
      Opts.short 'g'
   <> Opts.long "codegen"
-  <> Opts.value [P.JS]
+  <> Opts.value [Dart.Dart]
   <> Opts.help
       ( "Specifies comma-separated codegen targets to include. "
       <> targetsMessage
-      <> " The default target is 'js', but if this option is used only the targets specified will be used."
+      <> " The default target is 'dart', but if this option is used only the targets specified will be used."
       )
 
 targetsMessage :: String
-targetsMessage = "Accepted codegen targets are '" <> intercalate "', '" (M.keys P.codegenTargets) <> "'."
+targetsMessage = "Accepted codegen targets are '" <> intercalate "', '" (M.keys Dart.codegenTargets) <> "'."
 
-targetParser :: Opts.ReadM [P.CodegenTarget]
+targetParser :: Opts.ReadM [Dart.CodegenTarget]
 targetParser =
   Opts.str >>= \s ->
     for (T.split (== ',') s)
       $ maybe (Opts.readerError targetsMessage) pure
-      . flip M.lookup P.codegenTargets
+      . flip M.lookup Dart.codegenTargets
       . T.unpack
       . T.strip
 
-options :: Opts.Parser P.Options
+options :: Opts.Parser Dart.Options
 options =
-  P.Options
+  Dart.Options
     <$> verboseErrors
     <*> (not <$> comments)
     <*> (handleTargets <$> codegenTargets)
   where
     -- Ensure that the JS target is included if sourcemaps are
-    handleTargets :: [P.CodegenTarget] -> S.Set P.CodegenTarget
-    handleTargets ts = S.fromList (if elem P.JSSourceMap ts then P.JS : ts else ts)
+    handleTargets :: [Dart.CodegenTarget] -> S.Set Dart.CodegenTarget
+    handleTargets ts = S.fromList ts
 
-pscMakeOptions :: Opts.Parser PSCMakeOptions
-pscMakeOptions = PSCMakeOptions <$> many inputFile
+hpOptions :: Opts.Parser HollowpointOptions
+hpOptions = HollowpointOptions <$> many inputFile
                                 <*> outputDirectory
                                 <*> options
                                 <*> (not <$> noPrefix)
                                 <*> jsonErrors
 
 command :: Opts.Parser (IO ())
-command = compile <$> (Opts.helper <*> pscMakeOptions)
+command = compile <$> (Opts.helper <*> hpOptions)

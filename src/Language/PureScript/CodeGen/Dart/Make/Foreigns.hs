@@ -38,11 +38,12 @@ import qualified Language.PureScript.CoreFn as CF
 import           Control.Monad.IO.Class
 import qualified Data.Map as M
 import qualified Language.PureScript.CoreFn as CF
-import           Language.PureScript.Make (Make)
 import           Language.PureScript.Make.Actions (RebuildPolicy)
 import           Language.PureScript.Names (ModuleName)
 import           System.Directory (doesFileExist)
 import           System.FilePath (replaceExtension)
+
+import           Language.PureScript.CodeGen.Dart.Make.Monad as Dart
 
 -- | Infer the module name for a module by looking for the same filename with
 -- a .dart extension.
@@ -66,5 +67,5 @@ inferForeignModules =
 -- | Check that the declarations in a given PureScript module match with those
 -- in its corresponding foreign module.
 -- TODO: checkForeignDecls for Dart
-checkForeignDecls :: CF.Module ann -> FilePath -> Make ()
+checkForeignDecls :: CF.Module ann -> FilePath -> Dart.Make ()
 checkForeignDecls _ _ = return ()

@@ -30,7 +30,6 @@ import Language.PureScript.Errors (ErrorMessageHint(..), SimpleErrorMessage(..),
                                    MultipleErrors(..), rethrow, errorMessage,
                                    errorMessage', rethrowWithPosition, addHint)
 import Language.PureScript.Names
-import Language.PureScript.Options
 import Language.PureScript.PSString (PSString, mkString)
 import Language.PureScript.Traversals (sndM)
 import qualified Language.PureScript.Constants as C
@@ -38,6 +37,7 @@ import qualified Language.PureScript.Constants as C
 -- FIXME
 -- import Language.PureScript.CoreImp.Optimizer
 
+import Language.PureScript.CodeGen.Dart.Options as Dart
 import Language.PureScript.CodeGen.Dart.Common as Common
 import qualified Language.PureScript.CodeGen.Dart.CoreImp.AST as AST
 import Language.PureScript.CodeGen.Dart.CoreImp.AST (AST, everywhereTopDownM, withSourceSpan)
@@ -48,7 +48,7 @@ import System.FilePath.Posix ((</>))
 -- module.
 moduleToJs
   :: forall m
-   . (Monad m, MonadReader Options m, MonadSupply m, MonadError MultipleErrors m)
+   . (Monad m, MonadReader Dart.Options m, MonadSupply m, MonadError MultipleErrors m)
   => Module Ann
   -> Maybe Text -- ^ Foreign includes, if any
   -> m [AST]
@@ -187,11 +187,7 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
       _ -> AST.VariableIntroduction Nothing (identToJs ident) (Just imp)
 
   withPos :: SourceSpan -> AST -> m AST
-  withPos ss imp = do
-    withSM <- asks (elem JSSourceMap . optionsCodegenTargets)
-    return $ if withSM
-      then withSourceSpan ss imp
-      else imp
+  withPos _ imp = return imp
 
   -- | Generate code in the simplified JavaScript intermediate representation for a variable based on a
   -- PureScript identifier.

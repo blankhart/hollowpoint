@@ -1,4 +1,4 @@
-module Example where
+module Dev.ExampleQRArchitecture where
 
 -- Example sum/product type data declaration.
 data ExampleSumProduct
