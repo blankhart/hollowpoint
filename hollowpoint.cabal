@@ -115,7 +115,7 @@ executable hollowpoint
     app
   ghc-options:
     -Wall
-    -O2
+--    -O2
     -fno-warn-unused-do-bind
     -threaded
     -rtsopts

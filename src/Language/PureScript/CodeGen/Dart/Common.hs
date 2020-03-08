@@ -21,9 +21,19 @@ moduleNameToJs (ModuleName pns) =
 --
 --  * Reserved javascript identifiers are prefixed with '$$'.
 identToJs :: Ident -> Text
+identToJs (Ident "undefined") = "null"
 identToJs (Ident name) = anyNameToJs name
 identToJs (GenIdent _ _) = internalError "GenIdent in identToJs"
 identToJs UnusedIdent = "$__unused"
+
+-- This is necessary because "undefined" is effectively built-in to CoreFn.
+-- https://github.com/purescript/purescript/blob/ed5fbfb75eb7d85431591d0c889fa8ada7174fd6/src/Language/PureScript/CoreFn/Desugar.hs#L92
+runIdentDart :: Ident -> Text
+runIdentDart (Ident "undefined") = "null"
+runIdentDart (Ident i) = i
+runIdentDart (GenIdent Nothing n) = "$" <> T.pack (show n)
+runIdentDart (GenIdent (Just name) n) = "$" <> name <> T.pack (show n)
+runIdentDart UnusedIdent = "$__unused"
 
 -- | Convert a 'ProperName' into a valid JavaScript identifier:
 --
@@ -142,7 +152,6 @@ nameIsJsBuiltIn name =
     , "Uint32Array"
     , "Uint8Array"
     , "Uint8ClampedArray"
-    , "undefined"
     , "unescape"
     , "URIError"
     , "WeakMap"

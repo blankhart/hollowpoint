@@ -288,6 +288,27 @@ Variables generally will be represented as `dynamic` unless full type annotation
 
 Another question is whether the default code generation should mark the functions as `final`.  Probably yes, absent a circumstance in which that would produce incorrect behavior.  Mutation requires the Dart FFI.
 
+### Functions
+
+Named top-level function variables must be declared as functions rather than as variables because Dart rejects recursion in those cases on the basis that the variable is used before it has been declared.  For example:
+
+```dart
+final dynamic absurd = (a) {
+    final dynamic spin = (v) {
+        final $1 = v;
+        final b = $1;
+        return spin(b);
+    };
+    return spin(a);
+};
+```
+
+Here `spin` is invalid, even though it is accepted as a top-level variable.
+
+## Module System
+
+No library directive is specified.  Dart official documentation states: "When the library directive isn’t specified, a unique tag is generated for each library based on its path and filename. Therefore, we suggest that you omit the library directive from your code unless you plan to generate library-level documentation."  See [note](https://dart.dev/guides/libraries/create-library-packages).
+
 ## Notes
 
 * Explore whether it is possible to provide compile-time errors using the existing typeclass infrastructure if a function is marked as intended to be tail-call optimized but the compiler is unable to perform the optimization.  This may have complicated interactions with currying, but the idea would be that applying a `TailRec =>` constraint requires each function to be either non-recursive or tail-recursive.
@@ -295,3 +316,7 @@ Another question is whether the default code generation should mark the function
 ## Frontend Changes
 
 * It would be useful if the `CoreFn.Ann.Meta` type had a field for `TypeClassAccessor`s so that backends can represent typeclasses other than as records.  For example, using native objects for sum/product types and string-keyed maps for records. The accessor would carry the type class name and would be populated in a [desugaring phase](https://github.com/purescript/purescript/blob/ed5fbfb75eb7d85431591d0c889fa8ada7174fd6/src/Language/PureScript/CoreFn/Desugar.hs#L115).
+
+* It would be useful if PureScript supported a package import to qualify the module name by the package as in the GHC `PackageImport` extension.  This would allow easier interoperation with package distribution systems for backends that do not bundle the generated code into a single source file, or that want to be called by foreign codebase.  For example the Dart import syntax is `package:xyz/module.dart`.  To avoid issues, the package used in generated code is always the same folder name, and the Dart project must use a [path package](https://dart.dev/tools/pub/dependencies#path-packages) in the `pubspec.yaml` which cannot be distributed via `pub.dev`.  Flutter also [uses pub](https://flutter.dev/docs/development/packages-and-plugins/using-packages).
+
+* Ideally there would be a mechanism to provide foreign implementations of packages that already exist on Pursuit but that assume a JavaScript backend in foreign languages.

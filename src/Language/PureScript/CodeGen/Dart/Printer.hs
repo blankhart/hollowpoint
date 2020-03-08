@@ -41,8 +41,8 @@ literals = mkPattern' match'
   -- FIXME: Package system, module naming, etc.
   match (Directive _ d) = return $ case d of
     Library lib -> emit $ "library " <> lib
-    Import lib qual -> emit $ "import \"" <> lib <> "\" as " <> qual
-    Export lib -> emit $ "export \"" <> lib <> "\""
+    Import lib qual -> emit $ "import \'" <> lib <> "\' as " <> qual
+    Export lib -> emit $ "export \'" <> lib <> "\'"
     Pragma p -> emit $ "@pragma('" <> p <> "')"
 
   match (NumericLiteral _ n) = return $ emit $ T.pack $ either show show n
@@ -220,6 +220,7 @@ literals = mkPattern' match'
           Nothing -> ""
 
 -- FIXME
+-- Very clunky
 recordAccessor :: Pattern PrinterState AST (Text, AST)
 recordAccessor = mkPattern match
   where
@@ -235,6 +236,9 @@ objectAccessor = mkPattern match
   match (ObjectAccessor _ (StringLiteral _ prop) val) =
     case decodeString prop of
       Just s | isValidJsIdentifier s -> Just (s, val)
+      -- NOTE: This was nasty to track down.  Reserved words must be
+      -- converted on the same basis.
+             | otherwise -> Just (anyNameToJs s, val)
       _ -> Nothing
   match _ = Nothing
 
@@ -242,9 +246,15 @@ objectAccessor = mkPattern match
 indexer :: (Emit gen) => Pattern PrinterState AST (gen, AST)
 indexer = mkPattern' match
   where
-  match (ArrayIndexer _ index val) = (,) <$> prettyPrintJS' index <*> pure val
-  match (RecordAccessor _ index val) = (,) <$> prettyPrintJS' index <*> pure val
-  match (ObjectAccessor _ index val) = (,) <$> prettyPrintJS' index <*> pure val
+  match (ArrayIndexer _ index val) =
+--    traceShow (index, val) $
+    (,) <$> prettyPrintJS' index <*> pure val
+  match (RecordAccessor _ index val) =
+--    traceShow (index, val) $
+    (,) <$> prettyPrintJS' index <*> pure val
+  match (ObjectAccessor _ index val) =
+--    traceShow (index, val) $
+    (,) <$> prettyPrintJS' index <*> pure val
   match _ = mzero
 
 lam :: Pattern PrinterState AST ((Maybe Text, [Text], Maybe SourceSpan), AST)
@@ -301,6 +311,7 @@ prettyStatements sts = do
   indentString <- currentIndent
   let declFlags = map isDecl sts
       isDecl (ClassDeclaration _ _ _ _) = True
+      isDecl (Function _ (Just _) _ _) = True
       isDecl _ = False
       fmtStmt js decl = case decl of
         True -> indentString <> js

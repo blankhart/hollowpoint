@@ -1,5 +1,7 @@
 module Dev.ExampleQRArchitecture where
 
+import Data.Eq
+
 -- Example sum/product type data declaration.
 data ExampleSumProduct
   = ExampleTermA Int Boolean

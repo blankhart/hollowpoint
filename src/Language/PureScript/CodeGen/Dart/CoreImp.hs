@@ -6,6 +6,8 @@ module Language.PureScript.CodeGen.Dart.CoreImp
   , moduleToJs
   ) where
 
+-- import Debug.Trace
+
 import Prelude.Compat
 import Protolude (ordNub)
 
@@ -14,6 +16,8 @@ import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.Reader (MonadReader, asks)
 import Control.Monad.Supply.Class
 
+import Data.Aeson.Casing (snakeCase)
+import Data.Foldable (foldl')
 import Data.List ((\\))
 import qualified Data.Foldable as F
 import qualified Data.Map as M
@@ -24,6 +28,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Language.PureScript.AST.SourcePos
+import qualified Language.PureScript.Constants as C
 import Language.PureScript.CoreFn
 import Language.PureScript.Crash
 import Language.PureScript.Errors (ErrorMessageHint(..), SimpleErrorMessage(..),
@@ -32,7 +37,6 @@ import Language.PureScript.Errors (ErrorMessageHint(..), SimpleErrorMessage(..),
 import Language.PureScript.Names
 import Language.PureScript.PSString (PSString, mkString)
 import Language.PureScript.Traversals (sndM)
-import qualified Language.PureScript.Constants as C
 
 -- FIXME
 -- import Language.PureScript.CoreImp.Optimizer
@@ -52,7 +56,7 @@ moduleToJs
   => Module Ann
   -> Maybe Text -- ^ Foreign includes, if any
   -> m [AST]
-moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ =
+moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decls) foreign_ =
   rethrow (addHint (ErrorInModule mn)) $ do
     let usedNames = concatMap getNames decls
     let mnLookup = renameImports usedNames imports
@@ -67,20 +71,24 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
       . filter (flip S.member usedModuleNames)
       . (\\ (mn : C.primModules)) $ ordNub $ map snd imports
     F.traverse_ (F.traverse_ checkIntegers) optimized
-    comments <- not <$> asks optionsNoComments
     --  Remove the use strict annotation and the foreign imports, and replace with a library and foreign import/re-export statement or another suitable scheme. Probably importing a child library is the easiest given namespacing restrictions.  Parallel foreign module with its own library directive.
-    let library = AST.Directive Nothing (AST.Library "x")
+    {-
+    -- comments <- not <$> asks optionsNoComments
+    let library = AST.Directive Nothing (AST.Library "index")
     let header =
           if comments && not (null coms)
             then AST.Comment Nothing coms library
             else library
+    -}
     -- foreigns represents an AST
     let foreign' = case foreign_ of
           Just ffi | not (null foreigns) ->
-            [AST.Directive Nothing (AST.Import ffi "$foreign")]
+            [ AST.Directive Nothing (AST.Import ffi "$foreign")
+            , AST.Directive Nothing (AST.Export ffi)
+            ]
           _ ->
             []
-    return $ header : foreign' ++ jsImports ++ concat optimized
+    return $ {- header : -} foreign' ++ jsImports ++ concat optimized
     {- Rename these with underscores
     let foreignExps = exps `intersect` foreigns
     let standardExps = exps \\ foreignExps
@@ -116,15 +124,19 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
          then freshModuleName (i + 1) mn' used
          else newName
 
-  -- | Generates JavaScript code for a module import, binding the required module
-  -- to the alternative
+  -- | Generates Dart code for a module import, binding the required module to the alternative
   importToJs :: M.Map ModuleName (Ann, ModuleName) -> ModuleName -> m AST
   importToJs mnLookup mn' = do
-    let ((ss, _, _, _), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-    withPos ss $ AST.Directive Nothing (AST.Import (fromString (".." </> T.unpack (runModuleName mn') </> "index.dart")) (moduleNameToJs mnSafe))
+    let
+      ((ss, _, _, _), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
+      dartModulePath = foldl' (</>) "" $ snakeCase . T.unpack <$> T.split (=='.') (runModuleName mn')
+    withPos ss $ AST.Directive Nothing
+      (AST.Import
+        (fromString ("package:pkg" </> dartModulePath </> "index.dart"))
+        (moduleNameToJs mnSafe)
+      )
 
-  -- | Replaces the `ModuleName`s in the AST so that the generated code refers to
-  -- the collision-avoiding renamed module imports.
+  -- | Replaces the `ModuleName`s in the AST so that the generated code refers to the collision-avoiding renamed module imports.
   renameModules :: M.Map ModuleName (Ann, ModuleName) -> [Bind Ann] -> [Bind Ann]
   renameModules mnLookup binds =
     let (f, _, _) = everywhereOnValues id goExpr goBinder
@@ -134,7 +146,8 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
     goExpr (Var ann q) = Var ann (renameQual q)
     goExpr e = e
     goBinder :: Binder a -> Binder a
-    goBinder (ConstructorBinder ann q1 q2 bs) = ConstructorBinder ann (renameQual q1) (renameQual q2) bs
+    goBinder (ConstructorBinder ann q1 q2 bs) =
+      ConstructorBinder ann (renameQual q1) (renameQual q2) bs
     goBinder b = b
     renameQual :: Qualified a -> Qualified a
     renameQual (Qualified (Just mn') a) =
@@ -180,6 +193,19 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
     unAbs :: Expr Ann -> [Ident]
     unAbs (Abs _ arg val) = arg : unAbs val
     unAbs _ = []
+  nonRecToJS _ ident@(Ident i) (Abs _ arg val) | i /= "dict" = do
+    ret <- valueToJs val
+    let jsArg = case arg of
+          UnusedIdent -> []
+          _           -> [identToJs arg]
+    return $
+      AST.Function Nothing
+        (Just $ identToJs ident)
+        jsArg
+        (case ret of
+          AST.Block _ _ -> ret
+          _ -> AST.Block Nothing [AST.Return Nothing ret]
+        )
   nonRecToJS (ss, _, _, _) ident val = do
     imp <- valueToJs val
     withPos ss $ case imp of
@@ -252,17 +278,11 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
       Nothing
       ["dict"]
       (AST.Block Nothing [AST.Return Nothing body])
-  valueToJs' (Accessor _ prop val) =
-    recordAccessorString prop <$> valueToJs val
-  valueToJs' (ObjectUpdate _ o ps) = do
-    obj <- valueToJs o
-    sts <- mapM (sndM valueToJs) ps
-    extendObj obj sts
   valueToJs' (Abs _ arg val) = do
     ret <- valueToJs val
     let jsArg = case arg of
-                  UnusedIdent -> []
-                  _           -> [identToJs arg]
+          UnusedIdent -> []
+          _           -> [identToJs arg]
     return $
       AST.Function Nothing
         Nothing
@@ -271,6 +291,12 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
           AST.Block _ _ -> ret
           _ -> AST.Block Nothing [AST.Return Nothing ret]
         )
+  valueToJs' (Accessor _ prop val) =
+    recordAccessorString prop <$> valueToJs val
+  valueToJs' (ObjectUpdate _ o ps) = do
+    obj <- valueToJs o
+    sts <- mapM (sndM valueToJs) ps
+    extendObj obj sts
   valueToJs' e@App{} = do
     let (f, args) = unApp e []
     args' <- mapM valueToJs args
@@ -303,7 +329,18 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
   valueToJs' (Let _ ds val) = do
     ds' <- concat <$> mapM bindToAst ds
     ret <- valueToJs val
-    return $ AST.Block Nothing (ds' ++ [AST.Return Nothing ret])
+    return $
+      AST.App Nothing
+        (AST.Function Nothing
+          Nothing
+          []
+          (AST.Block Nothing (ds' ++ [AST.Return Nothing ret])))
+        []
+--    NOTE: The simpler version does not comply with Dart syntax, as
+--    it is not permitted to return a block { } with statements and a return.
+--    So there is an immediately invoked function.  In principle this code
+--    could be reorganized.
+--    return $ AST.Block Nothing (ds' ++ [AST.Return Nothing ret])
 
   -- Newtype constructor
   -- TODO: Figure out why this gets eliminated.
@@ -363,12 +400,15 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
   -- | Generate code in the simplified JavaScript intermediate representation for a reference to a
   -- variable that may have a qualified name.
   qualifiedToJS :: (a -> Ident) -> Qualified a -> AST
-  qualifiedToJS f (Qualified (Just (ModuleName [ProperName mn'])) a) | mn' == C.prim = AST.Var Nothing . runIdent $ f a
-  qualifiedToJS f (Qualified (Just mn') a) | mn /= mn' = objectAccessor (f a) (AST.Var Nothing (moduleNameToJs mn'))
+  qualifiedToJS f (Qualified (Just (ModuleName [ProperName mn'])) a)
+    | mn' == C.prim = AST.Var Nothing . runIdentDart $ f a
+  qualifiedToJS f (Qualified (Just mn') a)
+    | mn /= mn' =
+        objectAccessor (f a) (AST.Var Nothing (moduleNameToJs mn'))
   qualifiedToJS f (Qualified _ a) = AST.Var Nothing $ identToJs (f a)
 
   foreignIdent :: Ident -> AST
-  foreignIdent ident = objectAccessorString (mkString $ runIdent ident) (AST.Var Nothing "$foreign")
+  foreignIdent ident = objectAccessorString (mkString $ runIdentDart ident) (AST.Var Nothing "$foreign")
 
   -- | Generate code in the simplified JavaScript intermediate representation for pattern match binders and guards.
   --  FIXME: This generates assignment bindings for unused variables in Dart
@@ -393,11 +433,18 @@ moduleToJs (Module _ coms mn _ imports _ {- exports -} foreigns decls) foreign_ 
           stmts' | AST.Return _ _ <- last stmts' -> (stmts', [])
           stmts' -> (stmts', throwing)
         throwing = [AST.Throw Nothing fallthroughError]
-    return $ AST.Block Nothing
-              ( assignments
-              ++ stmts
-              ++ exhaustiveCheck
-              )
+    return $ AST.App Nothing
+      (AST.Function Nothing
+        Nothing
+        []
+        (AST.Block Nothing
+          ( assignments
+          ++ stmts
+          ++ exhaustiveCheck
+          )
+        )
+      )
+      []
 
     where
       go :: [Text] -> [AST] -> [Binder Ann] -> m [AST]

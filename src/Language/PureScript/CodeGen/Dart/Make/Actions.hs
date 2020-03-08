@@ -4,7 +4,7 @@ module Language.PureScript.CodeGen.Dart.Make.Actions
   ( backendMakeActions
   ) where
 
-import Debug.Trace
+-- import Debug.Trace
 
 import           Prelude
 
