@@ -1,5 +1,3 @@
-module Language.PureScript.CodeGen.Dart.Command.Compile (compile) where
-
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -7,31 +5,38 @@ module Language.PureScript.CodeGen.Dart.Command.Compile (compile) where
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
+module Language.PureScript.CodeGen.Dart.Command.Compile (compile) where
+
 import           Control.Applicative
 import           Control.Monad
 import qualified Data.Aeson as A
+import qualified Data.Aeson.Types as A
 import Data.Aeson.Casing (snakeCase)
 import           Data.Bool (bool)
 import qualified Data.ByteString.Lazy.UTF8 as LBU8
 import Data.Foldable (foldl')
 import           Data.List (intercalate)
 import           Data.List.Split (splitOn)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Text (Text)
+
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import qualified Data.Text.Lazy as L
+import qualified Data.Text.Lazy.Encoding as L
+
 import           Data.Traversable (for)
 import           Development.Shake
 import           Development.Shake.FilePath
-import qualified Language.PureScript as P
-import qualified Language.PureScript.CST as CST
-import           Language.PureScript.Errors.JSON
-import qualified Options.Applicative as Opts
-import qualified System.Console.ANSI as ANSI
+import Language.PureScript (runModuleName)
+import Language.PureScript.CoreFn
+import Language.PureScript.CoreFn.FromJSON
 import           System.Exit (exitSuccess, exitFailure)
 import           System.Directory (getCurrentDirectory)
 import           System.FilePath.Glob (glob)
-import           System.IO (hPutStr, hPutStrLn, stderr)
+import           System.IO (hClose, hPutStr, hPutStrLn, openFile, IOMode(..), stderr)
 import           System.IO.UTF8 (readUTF8FilesT)
 
 import           Language.PureScript.CodeGen.Dart.Make.Actions as Dart
@@ -66,101 +71,84 @@ dartifyModuleName =
   . splitOn "."
 
 compile :: CommandLineOptions -> IO ()
-compile opts = runShake $ do
-  action $ do
-    when (cloVersion opts) $ putNormal $ "Version: " <> versionString
-    cs <- fmap dartifyModuleName <$> getModuleNames
-    let outputFiles = (\c -> cloOutputDir opts </> "lib" </> c) <$> cs
-    forM outputFiles $ \c -> putNormal c
+compile CommandLineOptions{..} = runShake $ do
 
-    {-
-    let kotlinFiles = ["output/pskt" </>  c <.> "kt" | c <- cs]
-    need ["foreigns"]
-    need kotlinFiles
-    when (runProgram opts) $ need ["run"]
+  let
+    pubspec =
+      cloOutputDir </> "pubspec" <.> "yaml"
+    getOutputLibraries = do
+      cs <- fmap dartifyModuleName <$> getModuleNames
+      return [cloOutputDir </> "lib" </> c | c <- cs, Just c /= cloMain]
+    purescriptLibraries =
+      cloOutputDir </> "lib" </> "**" </> "index" <.> "dart"
+
+  action $ do
+    when cloVersion $ putInfo $ "Version: " <> versionString
+    outputFiles <- getOutputLibraries
+    -- forM outputFiles $ \c -> putInfo c
+    need ("foreignFiles" : outputFiles)
+    need [pubspec]
+    need ["pub get"]
+    when cloRun $ do
+      when (isJust cloMain) $ do
+        need ["run"]
+
+  purescriptLibraries %> \out -> do
+    let modName = takeBaseName out
+    putInfo modName
+    return () -- processFile opts out ("output" </> modName </> "corefn.json")
+
+  -- Don't overwrite this, so that the user can change it.
+  -- Don't go by the package root, but require the package name and
+  -- any non-lib prefix so that import statements can be determined.
+  -- Or have a command to generate the pubspec file.
+  pubspec %> \out -> do
+    writeFileChanged out $ unlines
+      [ "name: " <> cloPackageName
+      ]
+
+  phony "pub get" $ do
+    return ()
 
   phony "run" $ do
-    need ["output/pskt/program.jar"]
-    command_ [] "java" ["-jar", "output/pskt/program.jar"]
+    return ()
+    -- need ["output/pskt/program.jar"]
+    -- command_ [] "java" ["-jar", "output/pskt/program.jar"]
 
-  "output/pskt/program.jar" %> \out -> do
-    ktFiles <- fmap (\modName -> "output/pskt" </> modName <.> "kt") <$> getModuleNames
-    need ktFiles
-    need ["output/pskt/EntryPoint.kt"]
-    command_
-      [AddEnv "JAVA_OPTS" "-Xmx2G -Xms256M"]
-      "kotlinc" $
-        ["output/pskt/PsRuntime.kt", "output/pskt/EntryPoint.kt"]
-        ++ ktFiles
-        ++ ["output/pskt/foreigns" ]
-        ++ ["-include-runtime", "-d", out]
-        ++ ["-nowarn"]
-
-
-  "output/pskt/PsRuntime.kt" %> \out ->
-    writeFileChanged out $ unlines
-      [ "@file:Suppress(\"UNCHECKED_CAST\", \"USELESS_CAST\")"
-      , "package Foreign.PsRuntime;"
-      , ""
-      , "fun Any.app(arg: Any): Any {"
-      , "   return (this as (Any) -> Any)(arg)"
-      , "}"
-      , ""
-      , "fun Any.appRun() = (this as () -> Any)()"
-      ]
-
-  "output/pskt/EntryPoint.kt" %> \out ->
-    writeFileChanged out $ unlines
-      [ "@file:Suppress(\"UNCHECKED_CAST\", \"USELESS_CAST\")"
-      , "import Foreign.PsRuntime.appRun;"
-      , ""
-      , "fun main() {"
-      , "   PS.Main.Module.main.appRun()"
-      , "}"
-      ]
-
+  --  Users can put foreign files in their own code, alongside PureScript, or can publish them separately, etc., as long as there are foreign files corresponding to the PS modules.  This means that the organization of the foreign input files generally should track a PS module structure.
+  --
+  --  There doesn't seem to be an obvious clean way to import foreign modules that have an external Dart dependency.  That would be expressed in the package's pubspec.yaml file, but the user would need to know about the dependency and import it manually.
+  --
   phony "foreigns" $ do
+    return ()
+    {-
     let foreignOut = "output/pskt/foreigns/"
     foreignFiles <- forM (foreigns opts) $ \folder -> do
       files <- getDirectoryFiles folder ["*.kt"]
       return $ (\file -> (fileToModule file, folder </> file)) <$> files
     for_ (concat foreignFiles) $ \(modName, file) ->
       copyFileChanged file (foreignOut </> modName <.> "kt")
+    -}
 
 
-  "output/pskt/*.kt" %> \out -> do
-    let modName = takeBaseName out
-    processFile opts out ("output" </> modName </> "corefn.json")
-
-fileToModule :: FilePath -> String
-fileToModule path = replaceSlash <$> path
-    where
-      replaceSlash '/' = '.'
-      replaceSlash char = char
-
-processFile :: CliOptions -> FilePath -> FilePath -> Action ()
-processFile opts outFile path = do
-  jsonText <- T.pack <$> readFile' path
-  let mod = loadModuleFromJSON jsonText
-  let modName = runModuleName $ moduleName mod
-  let moduleKt = moduleToKt' mod
-  -- pPrint moduleKt
-  outputFile <- liftIO $ openFile outFile WriteMode
-  putNormal $ "Transpiling " <> T.unpack modName
-  let moduleDoc = moduleToText mod
-  liftIO $ renderIO outputFile moduleDoc
-  liftIO $ hClose outputFile
+processFile :: CommandLineOptions -> FilePath -> FilePath -> Action ()
+processFile opts outputPath coreFnPath = do
+  jsonText <- T.pack <$> readFile' coreFnPath
+  let modCoreFn = loadModuleFromJSON jsonText
+  let modCoreImp = Dart.moduleToJs modCoreFn
+  let modOutput = Dart.prettyPrintJS modCoreImp
+  putInfo $ "Compiling " <> T.unpack (runModuleName $ moduleName modCoreFn)
+  liftIO $ TIO.writeFile outputPath modOutput
 
 -- Load `CoreFN` JSON representation into a `Module Ann`.
 loadModuleFromJSON :: Text -> Module Ann
-loadModuleFromJSON value =
-  case parse moduleFromJSON value of
-    Success (_, r) -> r
+loadModuleFromJSON text =
+  case A.parse moduleFromJSON value of
+    A.Success (_, r) -> r
     _ -> internalError "failed to parse JSON value"
   where
     value = fromMaybe (internalError "ill-formatted CoreFn JSON") $
-      decode . L.encodeUtf8 $ L.fromStrict text
--}
+      A.decode . L.encodeUtf8 $ L.fromStrict text
 
 internalError :: Text -> a
 internalError = error . T.unpack

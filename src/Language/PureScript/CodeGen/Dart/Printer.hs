@@ -28,7 +28,8 @@ import Language.PureScript.CodeGen.Dart.Common
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
 import Language.PureScript.CodeGen.Dart.String as Dart
 
--- TODO (Christoph): Get rid of T.unpack / pack
+prettyPrintJS :: [AST] -> Text
+prettyPrintJS = maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0) . prettyStatements
 
 literals :: (Emit gen) => Pattern PrinterState AST gen
 literals = mkPattern' match'
@@ -324,9 +325,6 @@ prettyPrintJSWithSourceMaps :: [AST] -> (Text, [SMap])
 prettyPrintJSWithSourceMaps js =
   let StrPos (_, s, mp) = (fromMaybe (internalError "Incomplete pattern") . flip evalStateT (PrinterState 0) . prettyStatements) js
   in (s, mp)
-
-prettyPrintJS :: [AST] -> Text
-prettyPrintJS = maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0) . prettyStatements
 
 -- | Generate an indented, pretty-printed string representing a JavaScript expression
 prettyPrintJS' :: (Emit gen) => AST -> StateT PrinterState Maybe gen

@@ -1,7 +1,7 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Language.PureScript.CodeGen.Dart.Command.Options where
 
-import Data.Text (Text)
-import qualified Data.Text as T
 import Options.Applicative
 
 import Language.PureScript.CodeGen.Dart.Version (versionString)
@@ -11,12 +11,24 @@ import qualified Data.Set as S
 import Data.Map (Map)
 import qualified Data.Map as Map
 
+-- Additional options:
+-- * Regenerate all
+-- * Require/read existing pubspec.yaml
+-- * Take cloPackageRoot, cloLibraryPrefix
+--    E.g., "target" / "ps"
+--    Then write files to target/lib/ps/[prelude/index.dart] (e.g.)
+--    But any main-is will be written to target/bin/[main/index.dart]
+-- * Really they are EXTRA foreign includes, since will want foreigns for one's own project to be kept with the PS.
+-- * Dart Native (AOT) compilation
+-- * Dart2Js
 data CommandLineOptions = CommandLineOptions
   { cloVersion :: Bool
   -- ^ Print the program version
   , cloOutputDir :: FilePath
   -- ^ Directory for the generated Dart package
-  , cloMainIs :: Maybe Text
+  , cloPackageName :: FilePath
+  -- ^ Name of the generated Dart package
+  , cloMain :: Maybe FilePath
   -- ^ Main module
   , cloRun :: Bool
   -- ^ Run the program
@@ -40,11 +52,20 @@ cliOptions = CommandLineOptions
     <> showDefault
     <> help "Package directory for the generated Dart files"
     )
-  <*> optional (strOption
-    ( long "main-is"
-    <> short 'm'
-    <> help "Package directory for the generated Dart files"
-    ))
+  <*> strOption
+    ( long "package-name"
+    <> short 'p'
+    <> value "target"
+    <> showDefault
+    <> help "Package name for the generated Dart project"
+    )
+  <*> optional
+    (strOption
+      ( long "main-is"
+      <> short 'm'
+      <> help "Name of the executable module (main :: Effect Unit)"
+      )
+    )
   <*> switch
     ( long "run"
     <> help "Run the program in interpreted mode"

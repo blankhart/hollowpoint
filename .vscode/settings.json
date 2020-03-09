@@ -10,7 +10,7 @@
     "dist-newstyle": true,
     "std": true,
     "example": true,
-    "app": true,
+    "app": false,
     "x": false,
     "**/.hollowpoint": true,
     "LICENSE": true,
