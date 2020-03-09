@@ -12,23 +12,19 @@ module Data.Ord
   , abs
   , signum
   , module Data.Ordering
---  , class OrdRecord, compareRecord
+  , class OrdRecord, compareRecord
   ) where
 
-import Data.Eq (class Eq, class Eq1, (/=))
--- import Data.Eq (class Eq, class Eq1, class EqRecord, (/=))
+import Data.Eq (class Eq, class Eq1, class EqRecord, (/=))
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Ordering (Ordering(..))
 import Data.Ring (class Ring, zero, one, negate)
 import Data.Unit (Unit)
 import Data.Void (Void)
-
-{-
 import Prim.Row as Row
 import Prim.RowList as RL
 import Record.Unsafe (unsafeGet)
 import Type.Data.RowList (RLProxy(..))
--}
 
 -- | The `Ord` type class represents types which support comparisons with a
 -- | _total order_.
@@ -218,7 +214,6 @@ class Eq1 f <= Ord1 f where
 instance ord1Array :: Ord1 Array where
   compare1 = compare
 
-{-
 class EqRecord rowlist row <= OrdRecord rowlist row where
   compareRecord :: RLProxy rowlist -> Record row -> Record row -> Ordering
 
@@ -247,4 +242,3 @@ instance ordRecord
        )
     => Ord (Record row) where
   compare = compareRecord (RLProxy :: RLProxy list)
--}

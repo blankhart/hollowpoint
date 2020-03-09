@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Language.PureScript.CodeGen.Dart.String
 ( prettyPrintString
 ) where

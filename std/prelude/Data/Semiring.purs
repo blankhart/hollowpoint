@@ -1,17 +1,15 @@
 module Data.Semiring
   ( class Semiring, add, (+), zero, mul, (*), one
---  , class SemiringRecord, addRecord, mulRecord, oneRecord, zeroRecord
+  , class SemiringRecord, addRecord, mulRecord, oneRecord, zeroRecord
   ) where
 
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Unit (Unit, unit)
-{-
 import Prim.Row as Row
 import Prim.RowList as RL
 import Record.Unsafe (unsafeGet, unsafeSet)
 import Type.Data.Row (RProxy(..))
 import Type.Data.RowList (RLProxy(..))
--}
 
 -- | The `Semiring` class is for types that support an addition and
 -- | multiplication operation.
@@ -67,20 +65,17 @@ instance semiringUnit :: Semiring Unit where
   mul _ _ = unit
   one = unit
 
-{-
 instance semiringRecord :: (RL.RowToList row list, SemiringRecord list row row) => Semiring (Record row) where
   add = addRecord (RLProxy :: RLProxy list)
   mul = mulRecord (RLProxy :: RLProxy list)
   one = oneRecord (RLProxy :: RLProxy list) (RProxy :: RProxy row)
   zero = zeroRecord (RLProxy :: RLProxy list) (RProxy :: RProxy row)
--}
 
 foreign import intAdd :: Int -> Int -> Int
 foreign import intMul :: Int -> Int -> Int
 foreign import numAdd :: Number -> Number -> Number
 foreign import numMul :: Number -> Number -> Number
 
-{-
 -- | A class for records where all fields have `Semiring` instances, used to
 -- | implement the `Semiring` instance for records.
 class SemiringRecord rowlist row subrow | rowlist -> subrow where
@@ -127,4 +122,3 @@ instance semiringRecordCons
       key = reflectSymbol (SProxy :: SProxy key)
       tail = zeroRecord (RLProxy :: RLProxy rowlistTail) (RProxy :: RProxy row)
       insert = unsafeSet key :: focus -> Record subrowTail -> Record subrow
--}

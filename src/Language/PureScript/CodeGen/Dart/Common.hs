@@ -1,7 +1,7 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Common code generation utility functions
 module Language.PureScript.CodeGen.Dart.Common where
-
-import Prelude.Compat
 
 import Data.Char
 import Data.Text (Text)

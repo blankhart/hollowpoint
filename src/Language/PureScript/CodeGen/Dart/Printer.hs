@@ -1,10 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Pretty printer for the Dart AST
 module Language.PureScript.CodeGen.Dart.Printer
   ( prettyPrintJS
   , prettyPrintJSWithSourceMaps
   ) where
-
-import Prelude.Compat
 
 -- FIXME: Remove, but note absence of exhaustivity checks with this API.
 -- import Debug.Trace (traceShow)

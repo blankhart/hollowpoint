@@ -305,9 +305,32 @@ final dynamic absurd = (a) {
 
 Here `spin` is invalid, even though it is accepted as a top-level variable.
 
+The most legible rendering of foreign functions in Dart would be as follows:
+
+```dart
+compare(lt) => (eq) => (gt) => (x) => (y) {
+  final d = compare(lt)(eq)(gt);
+  return x < y ? lt : x == y ? d(x)(y -1) : gt;
+};
+```
+
+This is a compact way of rendering curried functions.  The final cast to `dynamic` suppresses the Dart analyzer warning that it cannot infer the return type of the body because it is a block of code.  The use of a declaration rather than a statement (i.e., a variable binding) is necessary to ensure that the Dart analyzer does not reject recursive functions as using undeclared variables. Notice also that the Dart analyzer accepts the terminal semicolon in this case as if the declaration were a statement, due to the use of fat arrow syntax.
+
 ## Module System
 
 No library directive is specified.  Dart official documentation states: "When the library directive isn’t specified, a unique tag is generated for each library based on its path and filename. Therefore, we suggest that you omit the library directive from your code unless you plan to generate library-level documentation."  See [note](https://dart.dev/guides/libraries/create-library-packages).
+
+### Imports
+
+### Exports
+
+## Errors, Warnings, and Lints
+
+Disable static analysis through a file-by-file notation or an `analysis.yaml` file at the package root as described [here](https://dart.dev/guides/language/analysis-options#excluding-code-from-analysis).
+
+```dart
+// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types
+```
 
 ## Notes
 

@@ -11,9 +11,10 @@ stability:           Experimental
 library purescript-dart
   exposed-modules:
     Language.PureScript.CodeGen.Dart
--- FIXME: Move to other-modules, exporting only what app needs
     Language.PureScript.CodeGen.Dart.CoreImp
     Language.PureScript.CodeGen.Dart.CoreImp.AST
+    Language.PureScript.CodeGen.Dart.Command.Compile
+    Language.PureScript.CodeGen.Dart.Command.Options
     Language.PureScript.CodeGen.Dart.Common
     Language.PureScript.CodeGen.Dart.Make.Actions
     Language.PureScript.CodeGen.Dart.Make.Foreigns
@@ -21,19 +22,24 @@ library purescript-dart
     Language.PureScript.CodeGen.Dart.Options
     Language.PureScript.CodeGen.Dart.Printer
     Language.PureScript.CodeGen.Dart.String
+    Language.PureScript.CodeGen.Dart.Version
   other-modules:
     Paths_hollowpoint
   build-depends:
       base >=4.11 && < 5
     , base-compat
+    , ansi-terminal
     , bytestring
     , aeson
     , aeson-casing
     , containers
     , directory
     , filepath
+    , gitrev
+    , Glob
     , monad-control
     , mtl
+    , optparse-applicative
     , pattern-arrows
     , prettyprinter
     , process
@@ -41,59 +47,66 @@ library purescript-dart
     , purescript == 0.13.6
     , recursion-schemes
     , safe
+    , shake
     , sourcemap
+    , split
     , text
     , time
     , transformers
     , transformers-base
+    , utf8-string
   hs-source-dirs:
     src
   default-language:
     Haskell2010
-  default-extensions:
-    -- ApplicativeDo
-    -- AutoDeriveTypeable
-    BangPatterns
-    ConstraintKinds
-    DataKinds
-    DefaultSignatures
-    DeriveAnyClass
-    DeriveDataTypeable
-    DeriveFoldable
-    DeriveFunctor
-    DeriveGeneric
-    -- DeriveLift
-    DeriveTraversable
-    -- DerivingStrategies
-    DerivingVia
-    EmptyCase
-    EmptyDataDecls
-    ExplicitForAll
-    ExtendedDefaultRules
-    FlexibleContexts
-    FlexibleInstances
-    FunctionalDependencies
-    GADTs
-    InstanceSigs
-    KindSignatures
-    LambdaCase
-    MultiParamTypeClasses
-    MultiWayIf
-    NoImplicitPrelude
-    OverloadedStrings
-    PatternSynonyms
-    RankNTypes
-    ScopedTypeVariables
-    StandaloneDeriving
-    -- StrictData
-    TemplateHaskell
-    TupleSections
-    TypeApplications
-    TypeFamilies
-    TypeOperators
-    ViewPatterns
   ghc-options:
     -Wall
+
+executable psd
+  main-is:
+    Main.hs
+  hs-source-dirs:
+    cli
+  ghc-options:
+    -Wall
+--    -O2
+    -fno-warn-unused-do-bind
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+  build-depends:
+      base >=4.11 && < 5
+    , base-compat
+    , optparse-applicative
+    , aeson
+    , aeson-pretty
+    , ansi-terminal
+    , ansi-wl-pprint
+    , bytestring
+    , containers
+    , directory
+    , file-embed
+    , filepath
+    , gitrev
+    , Glob
+    , http-types
+    , monad-logger
+    , mtl
+    , network >= 3.0.1.1
+    , optparse-applicative >=0.13.0
+    , process
+    , protolude
+    , purescript
+    , purescript-dart
+    , shake
+    , stm
+    , text
+    , time
+    , transformers
+    , utf8-string
+
+  default-language:
+    Haskell2010
 
 executable hollowpoint
   main-is:
@@ -156,7 +169,7 @@ executable hollowpoint
     , wai-websockets ==3.*
     , warp ==3.*
     , websockets >=0.9 && <0.13
-
   default-language:
     Haskell2010
+
 

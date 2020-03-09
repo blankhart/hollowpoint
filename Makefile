@@ -4,7 +4,7 @@
 example :
 	rm -rf example/pkg && \
 	mkdir example/pkg && \
-	cabal run hollowpoint compile example/src/**/*.purs std/prelude/**/*.purs -- -o example/pkg && \
+	cabal run hollowpoint compile std/prelude/**/*.purs -- -o example/pkg && \
 	echo "name: pkg" >> example/pkg/pubspec.yaml && \
 	cd example/pkg && pub get
 

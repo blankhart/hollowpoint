@@ -1,19 +1,16 @@
 module Data.Ring
   ( class Ring, sub, negate, (-)
   , module Data.Semiring
---  , class RingRecord, subRecord
+  , class RingRecord, subRecord
   ) where
 
-import Data.Semiring (class Semiring, add, mul, one, zero, (*), (+))
--- import Data.Semiring (class Semiring, class SemiringRecord, add, mul, one, zero, (*), (+))
+import Data.Semiring (class Semiring, class SemiringRecord, add, mul, one, zero, (*), (+))
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Unit (Unit, unit)
-{-
 import Prim.Row as Row
 import Prim.RowList as RL
 import Record.Unsafe (unsafeGet, unsafeSet)
 import Type.Data.RowList (RLProxy(..))
--}
 
 -- | The `Ring` class is for types that support addition, multiplication,
 -- | and subtraction operations.
@@ -39,10 +36,8 @@ instance ringUnit :: Ring Unit where
 instance ringFn :: Ring b => Ring (a -> b) where
   sub f g x = f x - g x
 
-{-
 instance ringRecord :: (RL.RowToList row list, RingRecord list row row) => Ring (Record row) where
   sub = subRecord (RLProxy :: RLProxy list)
--}
 
 -- | `negate x` can be used as a shorthand for `zero - x`.
 negate :: forall a. Ring a => a -> a
@@ -51,7 +46,6 @@ negate a = zero - a
 foreign import intSub :: Int -> Int -> Int
 foreign import numSub :: Number -> Number -> Number
 
-{-
 -- | A class for records where all fields have `Ring` instances, used to
 -- | implement the `Ring` instance for records.
 class SemiringRecord rowlist row subrow <= RingRecord rowlist row subrow | rowlist -> subrow where
@@ -73,4 +67,3 @@ instance ringRecordCons
       key = reflectSymbol (SProxy :: SProxy key)
       get = unsafeGet key :: Record row -> focus
       tail = subRecord (RLProxy :: RLProxy rowlistTail) ra rb
--}

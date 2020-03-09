@@ -1,17 +1,15 @@
 module Data.HeytingAlgebra
   ( class HeytingAlgebra, tt, ff, implies, conj, disj, not, (&&), (||)
---  , class HeytingAlgebraRecord, ffRecord, ttRecord, impliesRecord, conjRecord, disjRecord, notRecord
+  , class HeytingAlgebraRecord, ffRecord, ttRecord, impliesRecord, conjRecord, disjRecord, notRecord
   ) where
 
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Data.Unit (Unit, unit)
-{-
 import Prim.Row as Row
 import Prim.RowList as RL
 import Record.Unsafe (unsafeGet, unsafeSet)
 import Type.Data.Row (RProxy(..))
 import Type.Data.RowList (RLProxy(..))
--}
 
 -- | The `HeytingAlgebra` type class represents types that are bounded lattices with
 -- | an implication operator such that the following laws hold:
@@ -73,7 +71,6 @@ instance heytingAlgebraFunction :: HeytingAlgebra b => HeytingAlgebra (a -> b) w
   disj f g a = f a || g a
   not f a = not (f a)
 
-{-
 instance heytingAlgebraRecord :: (RL.RowToList row list, HeytingAlgebraRecord list row row) => HeytingAlgebra (Record row) where
   ff = ffRecord  (RLProxy :: RLProxy list) (RProxy :: RProxy row)
   tt = ttRecord  (RLProxy :: RLProxy list) (RProxy :: RProxy row)
@@ -81,13 +78,11 @@ instance heytingAlgebraRecord :: (RL.RowToList row list, HeytingAlgebraRecord li
   disj = disjRecord  (RLProxy :: RLProxy list)
   implies = impliesRecord  (RLProxy :: RLProxy list)
   not = notRecord  (RLProxy :: RLProxy list)
--}
 
 foreign import boolConj :: Boolean -> Boolean -> Boolean
 foreign import boolDisj :: Boolean -> Boolean -> Boolean
 foreign import boolNot :: Boolean -> Boolean
 
-{-
 -- | A class for records where all fields have `HeytingAlgebra` instances, used
 -- | to implement the `HeytingAlgebra` instance for records.
 class HeytingAlgebraRecord rowlist row subrow | rowlist -> subrow where
@@ -153,4 +148,3 @@ instance heytingAlgebraRecordCons
       key = reflectSymbol (SProxy :: SProxy key)
       insert = unsafeSet key :: focus -> Record subrowTail -> Record subrow
       tail = ttRecord (RLProxy :: RLProxy rowlistTail) row
--}

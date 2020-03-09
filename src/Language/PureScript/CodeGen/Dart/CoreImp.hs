@@ -1,3 +1,9 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
+
 -- | This module generates code in the core imperative representation from
 -- elaborated PureScript code.
 module Language.PureScript.CodeGen.Dart.CoreImp
@@ -8,7 +14,6 @@ module Language.PureScript.CodeGen.Dart.CoreImp
 
 -- import Debug.Trace
 
-import Prelude.Compat
 import Protolude (ordNub)
 
 import Control.Monad (forM, replicateM, void)

@@ -1,0 +1,17 @@
+{
+  "private": true,
+  "name": "purescript-ballista",
+  "version": "0.1.0",
+  "license": "MIT",
+  "scripts": {
+    "build": "spago build",
+    "postinstall": "spago install"
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "purescript": "^0.13.6",
+    "purty": "4.6.0",
+    "spago": "^0.14.0"
+  }
+}

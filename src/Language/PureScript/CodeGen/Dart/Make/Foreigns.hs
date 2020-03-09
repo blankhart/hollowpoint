@@ -1,6 +1,7 @@
-module Language.PureScript.CodeGen.Dart.Make.Foreigns where
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
-import           Prelude.Compat
+module Language.PureScript.CodeGen.Dart.Make.Foreigns where
 
 {-
 import           Control.Monad hiding (sequence)

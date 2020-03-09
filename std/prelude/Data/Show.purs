@@ -1,12 +1,12 @@
 module Data.Show
   ( class Show, show
---  , class ShowRecordFields, showRecordFields
+  , class ShowRecordFields, showRecordFields
   ) where
 
--- import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
--- import Prim.RowList as RL
--- import Record.Unsafe (unsafeGet)
--- import Type.Data.RowList (RLProxy(..))
+import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
+import Prim.RowList as RL
+import Record.Unsafe (unsafeGet)
+import Type.Data.RowList (RLProxy(..))
 
 -- | The `Show` type class represents those types which can be converted into
 -- | a human-readable `String` representation.
@@ -36,7 +36,6 @@ instance showString :: Show String where
 instance showArray :: Show a => Show (Array a) where
   show = showArrayImpl show
 
-{-
 instance showRecord :: (RL.RowToList rs ls, ShowRecordFields ls rs) => Show (Record rs) where
   show record = case showRecordFields (RLProxy :: RLProxy ls) record of
     [] -> "{}"
@@ -62,7 +61,6 @@ instance showRecordFieldsCons
       key = reflectSymbol (SProxy :: SProxy key)
       focus = unsafeGet key record :: focus
       tail = showRecordFields (RLProxy :: RLProxy rowlistTail) record
--}
 
 foreign import showIntImpl :: Int -> String
 foreign import showNumberImpl :: Number -> String

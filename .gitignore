@@ -14,5 +14,8 @@ cabal.project.local*
 *.svg
 
 # project
-example/output/
+example/pkg/*
 tmp/
+**/.hollowpoint/
+**/output
+**/target/
