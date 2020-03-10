@@ -24,12 +24,14 @@ import qualified Data.Map as Map
 data CommandLineOptions = CommandLineOptions
   { cloVersion :: Bool
   -- ^ Print the program version
-  , cloOutputDir :: FilePath
+  , cloPackageDir :: FilePath
   -- ^ Directory for the generated Dart package
   , cloPackageName :: FilePath
   -- ^ Name of the generated Dart package
+  , cloLibraryPrefix :: FilePath
+  -- ^ Prefix for the generated Dart libraries ({package_name}/lib/{prefix})
   , cloMain :: Maybe FilePath
-  -- ^ Main module
+  -- ^ Main module, if any
   , cloRun :: Bool
   -- ^ Run the program
   , cloStripComments :: Bool
@@ -58,6 +60,12 @@ cliOptions = CommandLineOptions
     <> value "target"
     <> showDefault
     <> help "Package name for the generated Dart project"
+    )
+  <*> strOption
+    ( long "library-prefix"
+    <> value "ps"
+    <> showDefault
+    <> help "Prefix for the generated Dart libraries"
     )
   <*> optional
     (strOption

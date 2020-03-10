@@ -320,6 +320,16 @@ This is a compact way of rendering curried functions.  The final cast to `dynami
 
 No library directive is specified.  Dart official documentation states: "When the library directive isn’t specified, a unique tag is generated for each library based on its path and filename. Therefore, we suggest that you omit the library directive from your code unless you plan to generate library-level documentation."  See [note](https://dart.dev/guides/libraries/create-library-packages).
 
+  --  Users can put foreign files in their own code, alongside PureScript, or can publish them separately, etc., as long as there are foreign files corresponding to the PS modules.  This means that the organization of the foreign input files generally should track a PS module structure.
+  --
+  --  There doesn't seem to be an obvious clean way to import foreign modules that have an external Dart dependency.  That would be expressed in the package's pubspec.yaml file, but the user would need to know about the dependency and import it manually.
+  --
+  --  However, if the foreign packages are identified by the build system, they could pass the package directory prefix to the Dart compiler for integration into the code.  Then it wouldn't be necessary to do any copying.
+  --
+  --  There are different modes: Direct load, and side-load foreigns.  Direct load the user's own code or specific-to-Dart packages, but side-load the packages from Pursuit.
+
+
+
 ### Imports
 
 ### Exports

@@ -70,3 +70,5 @@ inferForeignModules =
 -- TODO: checkForeignDecls for Dart
 checkForeignDecls :: CF.Module ann -> FilePath -> Dart.Make ()
 checkForeignDecls _ _ = return ()
+
+

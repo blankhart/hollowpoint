@@ -8,7 +8,7 @@
     "dist": true,
     "dist-doctest": true,
     "dist-newstyle": true,
-    "std": true,
+    "std": false,
     "example": true,
     "app": false,
     "x": false,
