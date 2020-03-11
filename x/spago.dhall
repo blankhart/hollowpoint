@@ -1,7 +1,7 @@
 { name =
     "purescript-ballista"
 , backend =
-    "cabal run psd -- --foreigns=../std"
+    "cabal run psd -- --foreigns=../std/*/"
 , dependencies =
     [ "effect", "console", "psci-support" ]
 , packages =
