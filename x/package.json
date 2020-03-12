@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "license": "MIT",
   "scripts": {
-    "build": "spago build",
+    "build": "rm -rf target && spago build",
     "postinstall": "spago install"
   },
   "dependencies": {

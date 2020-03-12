@@ -57,22 +57,26 @@ import System.FilePath.Posix ((</>))
 
 moduleToDart
   :: Dart.CommandLineOptions
-  -> Maybe Text -- ^ Foreign includes, if any
+  -> String
+  -> String
   -> Module Ann
   -> [AST]
-moduleToDart opts foreign_ mod = evalSupply 0 (moduleToDart' opts foreign_ mod)
+moduleToDart opts packageName libraryPrefix mod =
+  evalSupply 0 (moduleToDart' opts packageName libraryPrefix mod)
 
 -- | Generate code in the simplified JavaScript intermediate representation for all declarations in a module.
 moduleToDart'
   :: forall m . (Monad m, MonadSupply m)
   => Dart.CommandLineOptions
-  -> Maybe Text -- ^ Foreign includes, if any
+  -> String
+  -> String
   -> Module Ann
   -> m [AST]
 moduleToDart'
     CommandLineOptions{..}
-    foreign_
-    (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decls)
+    packageName
+    libraryPrefix
+    (Module _ comments mn _ imports exports foreigns decls)
     = do
       let usedNames = concatMap getNames decls
       let mnLookup = renameImports usedNames imports
@@ -97,15 +101,27 @@ moduleToDart'
               else library
       -}
       -- foreigns represents an AST
-      let foreign' = case foreign_ of
-            Just ffi | not (null foreigns) ->
-              [ AST.Directive Nothing (AST.Import ffi "$foreign")
-              , AST.Directive Nothing (AST.Export ffi)
-              ]
-            _ ->
-              []
+      let foreign' =
+            if not (null foreigns)
+              then
+                let
+                  moduleName = T.unpack $ runModuleName mn
+                  filename = T.pack $ "package:" <>
+                    (toTargetImportName packageName libraryPrefix "foreign" moduleName)
+                in
+                  [ AST.Directive Nothing (AST.Import filename "$foreign")
+                  , AST.Directive Nothing (AST.Export filename [])
+                  ]
+              else
+                []
       return $ {- header : -} foreign' ++ jsImports ++ concat optimized
-      {- Rename these with underscores
+      {-
+      --  Remove underscores from public identifiers
+      --  Insert missing underscores for private identifiers
+
+      --  Add `show` clauses to exports of foreign modules.
+      --  Or: mimic the JS strategy of constructing new variables that export
+
       let foreignExps = exps `intersect` foreigns
       let standardExps = exps \\ foreignExps
       let exps' = AST.RecordLiteral Nothing $ map (mkString . runIdent &&& AST.Var Nothing . identToJs) standardExps
@@ -145,10 +161,10 @@ moduleToDart'
   importToJs mnLookup mn' = do
     let
       ((ss, _, _, _), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-      dartModulePath = foldl' (</>) "" $ snakeCase . T.unpack <$> T.split (=='.') (runModuleName mn')
+      moduleName = T.unpack (runModuleName mn')
     withPos ss $ AST.Directive Nothing
       (AST.Import
-        (fromString ("package:pkg" </> dartModulePath </> "index.dart"))
+        (fromString ("package:" <> toTargetImportName packageName libraryPrefix "index" moduleName))
         (moduleNameToJs mnSafe)
       )
 

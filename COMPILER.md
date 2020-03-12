@@ -320,19 +320,31 @@ This is a compact way of rendering curried functions.  The final cast to `dynami
 
 No library directive is specified.  Dart official documentation states: "When the library directive isn’t specified, a unique tag is generated for each library based on its path and filename. Therefore, we suggest that you omit the library directive from your code unless you plan to generate library-level documentation."  See [note](https://dart.dev/guides/libraries/create-library-packages).
 
-  --  Users can put foreign files in their own code, alongside PureScript, or can publish them separately, etc., as long as there are foreign files corresponding to the PS modules.  This means that the organization of the foreign input files generally should track a PS module structure.
-  --
-  --  There doesn't seem to be an obvious clean way to import foreign modules that have an external Dart dependency.  That would be expressed in the package's pubspec.yaml file, but the user would need to know about the dependency and import it manually.
-  --
-  --  However, if the foreign packages are identified by the build system, they could pass the package directory prefix to the Dart compiler for integration into the code.  Then it wouldn't be necessary to do any copying.
-  --
-  --  There are different modes: Direct load, and side-load foreigns.  Direct load the user's own code or specific-to-Dart packages, but side-load the packages from Pursuit.
+Users can put foreign files in their own code, alongside PureScript, or can publish them separately, etc., as long as there are foreign files corresponding to the PS modules.  This means that the organization of the foreign input files generally should track a PS module structure.
 
+There doesn't seem to be an obvious clean way to import foreign modules that have an external Dart dependency.  That would be expressed in the package's pubspec.yaml file, but the user would need to know about the dependency and import it manually.
 
+However, if the foreign packages are identified by the build system, they could pass the package directory prefix to the Dart compiler for integration into the code.  Then it wouldn't be necessary to do any copying.
+
+There are different modes: Direct load, and side-load foreigns.  Direct load the user's own code or specific-to-Dart packages, but side-load the packages from Pursuit.
+
+    --  Possibly, use the shake system by creating a mapping between the module name/the PureScript output file, and the module name/Dart FFI output file, on each build. Then shake rules can be used while efficiently looking up the relevant mappings.
+
+    --  If there is a main module or modules, then generate a package_dir/bin/main module file that just forwards to the library main file.
+
+    --  If the snake case conventions are honored, then module names may not be invertible due to case sensitivity.  Dart requires file names to be snake cased because some file systems are not case sensitive.  In general, PureScript libraries should avoid collisions based on case sensitivity.
 
 ### Imports
 
 ### Exports
+
+TODO: It's not entirely clear how module exports work.  The `Module Ann` data type has a `moduleExports` field of type `Ident` rather than `Qualified Ident` so it does not associate an identifier with a particular module.  In order to get that information, it would be necessary to traverse the tree and extract it from variable references.
+
+So this library would have to gather up the exports by identifier and then reexport them.  They should not be able to have a colliding name.
+
+The frontend generates exports  translates module exports to nothing in the printed code, althoguh new bindings that forward to the underlying module, rather than directly exporting from the underlying module.
+
+For module exports, desugaring resolves imports through a transitive expansion. As a result, it is not necessary for a backend to handle qualified exports in the target language.
 
 ## Errors, Warnings, and Lints
 
@@ -341,6 +353,26 @@ Disable static analysis through a file-by-file notation or an `analysis.yaml` fi
 ```dart
 // ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types
 ```
+
+The Dart backend should report some errors, but can rely on the Dart analyzer to report errors and warnings for some things after code generation has occurred.  For example, it is an error if the backend needs a foreign file that it cannot find.  But if the foreign file is missing implementations of functions used elsewhere in the codebase, the Dart analyzer will pick these up.
+
+{-
+
+  --  These should be run only when the PureScript output has changed, i.e. when there has been a change to:
+  --  * The `CoreFn` output for a PureScript module.
+  --  * The Dart FFI file corresponding to a PureScript module.
+    -- load from text
+    -- Equivalent of inferForeignModules/checkForeignDecls
+    -- verify if module has foreign bindings
+    -- if it has a foreign file, need the foreign file
+    -- * if not found but needed, raise an error
+    -- * if found but not needed, raise a warning
+    -- verify that the foreign file has the necessary Dart declarations
+    -- * if any missing, specify which
+    -- if foreign file is found and validated, pass the path to compiler
+
+-}
+
 
 ## Notes
 

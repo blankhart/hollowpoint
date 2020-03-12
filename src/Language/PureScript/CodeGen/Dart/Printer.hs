@@ -43,7 +43,7 @@ literals = mkPattern' match'
   match (Directive _ d) = return $ case d of
     Library lib -> emit $ "library " <> lib
     Import lib qual -> emit $ "import \'" <> lib <> "\' as " <> qual
-    Export lib -> emit $ "export \'" <> lib <> "\'"
+    Export lib _ -> emit $ "export \'" <> lib <> "\'"
     Pragma p -> emit $ "@pragma('" <> p <> "')"
 
   match (NumericLiteral _ n) = return $ emit $ T.pack $ either show show n

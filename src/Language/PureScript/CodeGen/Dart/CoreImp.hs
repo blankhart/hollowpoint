@@ -89,7 +89,7 @@ moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decl
     let foreign' = case foreign_ of
           Just ffi | not (null foreigns) ->
             [ AST.Directive Nothing (AST.Import ffi "$foreign")
-            , AST.Directive Nothing (AST.Export ffi)
+            , AST.Directive Nothing (AST.Export ffi [])
             ]
           _ ->
             []

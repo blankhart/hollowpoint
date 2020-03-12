@@ -17,9 +17,10 @@ import Data.Aeson.Casing (snakeCase)
 import           Data.Bool (bool)
 import qualified Data.ByteString.Lazy.UTF8 as LBU8
 import Data.Foldable (foldl', for_)
-import           Data.List (intercalate)
+import qualified Data.IORef as IORef
+import           Data.List (intercalate, stripPrefix)
 import           Data.List.Split (splitOn)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Text (Text)
@@ -48,7 +49,7 @@ import           Language.PureScript.CodeGen.Dart.Make.Monad as Dart
 import qualified Language.PureScript.CodeGen.Dart.CoreImp2 as Dart
 import qualified Language.PureScript.CodeGen.Dart.Printer as Dart
 
-
+import Language.PureScript.CodeGen.Dart.Common (toTargetFileName, toTargetImportName)
 import Language.PureScript.CodeGen.Dart.Command.Options (CommandLineOptions(..))
 import Language.PureScript.CodeGen.Dart.Version (versionString)
 
@@ -60,15 +61,6 @@ runShake = shake shakeOptions
   , shakeVersion = versionString
   }
 
--- Replace chars rather than split and rejoin
-dartifyModuleName :: FilePath -> FilePath -> FilePath
-dartifyModuleName name =
-    (<.> "dart")
-  . (</> name)
-  . foldl' (</>) ""
-  . fmap snakeCase
-  . splitOn "."
-
 -- For now assume in the form Data/Ord.dart
 psifyModuleName :: FilePath -> String
 psifyModuleName =
@@ -77,24 +69,21 @@ psifyModuleName =
   . dropDirectory1 -- remove package name ("prelude/")
   . dropExtension -- remove extension (".dart")
 
+data InMemFileMap = InMemFileMap
+  { filemapDartSources :: M.Map String FilePath
+  -- ^ Module name to Dart FFI file.
+  , filemapDartTargets :: M.Map FilePath String
+  -- ^ Dart foreign target to module.
+  , filemapPursTargets :: M.Map FilePath String
+  -- ^ PureScript target to module.
+  }
+
 compile :: CommandLineOptions -> IO ()
-compile CommandLineOptions{..} = runShake $ action $ do
+compile opts@CommandLineOptions{..} = runShake $ do
 
   let
 
-    --  Possibly, use the shake system by creating a mapping between the module name/the PureScript output file, and the module name/Dart FFI output file, on each build. Then shake rules can be used while efficiently looking up the relevant mappings.
-
-    --  If there is a main module or modules, then generate a package_dir/bin/main module file that just forwards to the library main file.
-
-    --  If the snake case conventions are honored, then module names may not be invertible due to case sensitivity.  Dart requires file names to be snake cased because some file systems are not case sensitive.  In general, PureScript libraries should avoid collisions based on case sensitivity.
-
-    --  `spago`/`purs` generate the `CoreFn` dumps as input to the backend.
-    getModuleNames =
-      fmap (takeFileName . takeDirectory) <$>
-        getDirectoryFiles "" ["output/*/corefn.json"]
-
-    makeOutputFileName base mn =
-      cloPackageDir </> "lib" </> cloLibraryPrefix </> dartifyModuleName base mn
+    makeOutputFileName = toTargetFileName cloPackageDir cloLibraryPrefix
 
     --  Compiled file is required whenever a `CoreFn` module is generated.
     pursOutputFileName = makeOutputFileName "index"
@@ -102,82 +91,149 @@ compile CommandLineOptions{..} = runShake $ action $ do
     --  Foreign file is required when `CoreFn` module has a non-empty `moduleForeign` field.
     dartOutputFileName = makeOutputFileName "foreign"
 
+    --  Generate build targets
+    pursOutputFileNames = pursOutputFileName "**"
+    dartOutputFileNames = dartOutputFileName "**"
+
     --  Bare `pubspec.yaml` is generated when specified on the command line.
     pubspec =
-      cloOutputDir </> "pubspec" <.> "yaml"
+      cloPackageDir </> "pubspec" <.> "yaml"
 
-    makeTargetMapping mn (pursTargets, dartTargets) =
+  -- TODO: Instead liftIO $ newCacheIO () with a unit key
+  ref <- liftIO $ IORef.newIORef (InMemFileMap mempty mempty mempty)
 
+  action $ do
 
-  -- Print version
-  when cloVersion $ putInfo $ "Version: " <> versionString
+    -- Print version
+    when cloVersion $ putInfo $ "Version: " <> versionString
 
-  putInfo $
-    "Looking for foreign files at: "
-    <> intercalate "," cloForeignInputDirs
+    -- Load a map of all modules and all foreign files
+    --  `spago`/`purs` generate the `CoreFn` dumps as input to the backend.
+    pursModuleNames <- do
+      filenames <- getDirectoryFiles "" ["output/*/corefn.json"]
+      return $ fmap (takeFileName . takeDirectory) filenames
 
-  -- Load a map of all modules and all foreign files
-  moduleNames <- getModuleNames
+    -- Load a list of all foreign Dart FFI files
+    -- (dir, filename)
+    dartSourceNames <- do
+      inputDirs <- liftIO $ traverse glob cloForeignInputDirs
+      filenames <- forM (concat inputDirs) $ \dir -> do
+        files <- getDirectoryFiles dir ["**/*.dart"]
+        return $ fmap (dir,) files
+      return $ concat filenames
 
-  pursTargets = M.fromList $
-    fmap (\mn -> (pursOutputFileName mn, mn) moduleNames
+    let
 
-  dartTargets = M.fromList $
-    fmap (\mn -> (dartOutputFileName mn, mn) moduleNames
+      -- Map (purs target, module name)
+      pursTargets = M.fromList $
+        fmap (\mn -> (pursOutputFileName mn, mn)) pursModuleNames
 
-  --  This is the key invertibility issue - the sources either have to have the target name already, so that they can be findable by reverse mapping the targets (swapping "foreign" for "index") or have the same names as the PureScript files.  These can be passed on the command line separately as "side load" or "direct load."
-  dartSources = M.fromList $
-    fmap (\mn -> (mn, source))
+      -- Map (dart target, module name)
+      dartTargets = M.fromList $
+        fmap (\mn -> (dartOutputFileName mn, mn)) pursModuleNames
 
-  --  These should be run only when the PureScript output has changed, i.e. when there has been a change to:
-  --  * The `CoreFn` output for a PureScript module.
-  --  * The Dart FFI file corresponding to a PureScript module.
-  for moduleNames $ \mn ->
-    -- load from text
-    -- Equivalent of inferForeignModules/checkForeignDecls
-    -- verify if module has foreign bindings
-    -- if it has a foreign file, need the foreign file
-    -- * if not found but needed, raise an error
-    -- * if found but not needed, raise a warning
-    -- verify that the foreign file has the necessary Dart declarations
-    -- * if any missing, specify which
-    -- if foreign file is found and validated, pass the path to compiler
+      -- Map (module name, dart source)
+      dartSources = foldl' insertSourceName mempty pursModuleNames
+        where
+          insertSourceName acc mn = M.update (const (findSourceName mn)) mn acc
 
-  foreignFiles <- forM cloForeignInputDirs $ \dir -> do
-    files <- getDirectoryFiles dir ["**/*.dart"]
-    let modules = psifyModuleName <$> files
-        qualifieds = dartifyModuleName "foreign" <$> modules
-        targets = (\f -> cloOutputDir </> "lib" </> f) <$> qualifieds
-        sources = fmap (dir </>) files
-    return $ zip sources targets
-  for_ (concat foreignFiles) $ \(source, target) -> do
-    putInfo $ "Copying " <> source <> " to " <> target <> "..."
-    copyFileChanged source target
+      -- Map (module name, dart source) assuming PureScript file format
+      dartSourcesPursFormat = M.fromList $
+        fmap (\(d, sn) -> (toModuleName sn, d </> sn)) dartSourceNames
+        where
+          toModuleName = intercalate "." . splitDirectories . dropExtension
+
+      -- Map (module name, dart source) assuming Dart package format
+      -- TODO: Unsupported; map module names to Dart file paths
+      --       and intersect the result with observed file paths
+      -- NOTE: There is no invertible mapping from Dart sources to module names
+      --       in this format due to case insensitivity.
+      dartSourcesDartFormat = M.fromList []
+
+      findSourceName mn =
+        M.lookup mn dartSourcesPursFormat <|> M.lookup mn dartSourcesDartFormat
+
+    liftIO $ IORef.writeIORef ref InMemFileMap
+      { filemapDartSources = dartSourcesPursFormat
+      , filemapDartTargets = dartTargets
+      , filemapPursTargets = pursTargets
+      }
+
+    -- putInfo $ "Modules: " <> intercalate "," (M.elems pursTargets)
+    -- putInfo $ "Sources: " <> intercalate "," (M.elems dartSources)
+    -- putInfo $ "Source names: " <> show dartSourcesPursFormat
+
+    need $ pursOutputFileName <$> pursModuleNames
+    need [pubspec]
+
+    -- It may not be necessary to run this from within the tool as
+    -- the user typically will have its own build script.  But convenient
+    -- perhaps to have under a flag.
+    putInfo $ "Running pub get from " <> cloPackageDir <> "..."
+    command_ [Cwd cloPackageDir] "pub" ["get"]
+
+  let
+    assertValidModuleName filename = fromMaybe $ internalError $
+      "No module associated with " <> (T.pack filename)
+    assertValidSourceName mn = fromMaybe $ internalError $
+      "No source associated with " <> (T.pack mn)
+
+  pursOutputFileNames %> \outputPath -> do
+
+    InMemFileMap{..} <- liftIO $ IORef.readIORef ref
+
+    let
+      mn = assertValidModuleName outputPath $
+        M.lookup outputPath filemapPursTargets
+      coreFnPath = "output" </> mn </> "corefn.json"
+
+    jsonText <- T.pack <$> readFile' coreFnPath
+    putInfo $ "Backend compiling " <> mn
+
+    let
+      modCoreFn = loadModuleFromJSON jsonText
+      ffiSourceFileName = M.lookup mn filemapDartSources
+      ffiTargetFileName = (const $ dartOutputFileName mn) <$> ffiSourceFileName
+      ffiRequired = not . null $ moduleForeign modCoreFn
+
+    -- TODO:  List input directories searched on failure.
+    --        Keep the list in a cache.
+    case ffiTargetFileName of
+      Just ffi
+        | not ffiRequired -> internalError $
+            T.pack mn <> " has a Dart FFI file but contains no foreign declarations."
+        | otherwise -> need [ffi]
+      Nothing
+        | ffiRequired -> internalError $
+            T.pack mn <> " requires a Dart FFI file, but none was found."
+        | otherwise -> return ()
+
+    let
+      modCoreImp =
+        Dart.moduleToDart opts cloPackageName cloLibraryPrefix modCoreFn
+      modOutput =
+        Dart.prettyPrintJS modCoreImp
+
+    writeFileChanged outputPath (T.unpack modOutput)
+
+  dartOutputFileNames %> \outputPath -> do
+    InMemFileMap{..} <- liftIO $ IORef.readIORef ref
+    let
+      mn = assertValidModuleName outputPath $
+        M.lookup outputPath filemapDartTargets
+      sn = assertValidSourceName mn $
+        M.lookup mn filemapDartSources
+    putInfo $ "Copying " <> sn <> " to " <> outputPath <> "..."
+    copyFileChanged sn outputPath
 
   -- If specified, generate a `pubspec.yaml`
   -- Don't go by the package root, but require the package name and
   -- any non-lib prefix so that import statements can be determined.
   -- Or have a command to generate the pubspec file.
-  writeFileChanged pubspec $ unlines
-    [ "name: " <> cloPackageName
-    ]
-
-  -- If specified, run the output
-  when cloRun $ do
-    when (isJust cloMain) $ do
-      return ()
-
-  -- Run pub get by default
-  return ()
-
-processFile :: CommandLineOptions -> FilePath -> FilePath -> Action ()
-processFile opts outputPath coreFnPath = do
-  jsonText <- T.pack <$> readFile' coreFnPath
-  let modCoreFn = loadModuleFromJSON jsonText
-  let modCoreImp = Dart.moduleToDart opts Nothing modCoreFn
-  let modOutput = Dart.prettyPrintJS modCoreImp
-  putInfo $ "Compiling " <> T.unpack (runModuleName $ moduleName modCoreFn)
-  writeFileChanged (T.unpack modOutput) outputPath
+  pubspec %> \outputPath -> do
+    writeFileChanged outputPath $ unlines
+      [ "name: " <> cloPackageName
+      ]
 
 -- Load `CoreFN` JSON representation into a `Module Ann`.
 loadModuleFromJSON :: Text -> Module Ann

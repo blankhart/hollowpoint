@@ -104,7 +104,7 @@ data AST
 data Directive
   = Library Text
   | Import Text Text -- ^ import "package:purescript/$1/index.dart" as $2
-  | Export Text
+  | Export Text [Text] -- ^ export $1 show $2
   -- TODO: This shouldn't be a directive, but an annotation
   -- This will require particular subfunctions to return lists of AST
   -- Or the AST to contain a Stmts [AST] node.

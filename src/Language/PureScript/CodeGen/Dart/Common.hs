@@ -10,6 +10,34 @@ import qualified Data.Text as T
 import Language.PureScript.Crash
 import Language.PureScript.Names
 
+import System.FilePath ((</>), (<.>))
+import Data.Aeson.Casing (snakeCase)
+import Data.List.Split (splitOn)
+import Data.Foldable (foldl')
+
+toDartFilePath :: FilePath -> FilePath
+toDartFilePath =
+    foldl' (</>) ""
+  . fmap snakeCase
+  . splitOn "."
+
+toTargetFileName :: FilePath -> FilePath -> FilePath -> String -> FilePath
+toTargetFileName packageDir libraryPrefix baseName moduleName =
+  packageDir
+  </> "lib"
+  </> libraryPrefix
+  </> toDartFilePath moduleName
+  </> baseName
+  <.> "dart"
+
+toTargetImportName :: String -> FilePath -> FilePath -> String -> FilePath
+toTargetImportName packageName libraryPrefix baseName moduleName =
+  packageName
+  </> libraryPrefix
+  </> toDartFilePath moduleName
+  </> baseName
+  <.> "dart"
+
 moduleNameToJs :: ModuleName -> Text
 moduleNameToJs (ModuleName pns) =
   let name = T.intercalate "_" (runProperName `map` pns)

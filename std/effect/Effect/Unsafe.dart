@@ -1,0 +1,1 @@
+unsafePerformEffect(f) => f();

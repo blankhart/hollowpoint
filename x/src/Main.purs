@@ -3,7 +3,7 @@ module Main where
 import Prelude
 
 import Effect (Effect)
-import Effect.Console (log)
+import Trial (log)
 
 main :: Effect Unit
 main = do

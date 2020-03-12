@@ -10,6 +10,6 @@ example :
 
 # && bat example/output/Example/index.js
 
-.PHONY: monitor
-monitor :
+.PHONY: ide
+ide :
 	ghcid --command="cabal repl"
