@@ -7,4 +7,6 @@ import Effect.Print (print)
 
 main :: Effect Unit
 main = do
-  print "Hello world!"
+  let a = 5
+      b = 6
+  print $ "Eleven: " <> show (5 + 6)

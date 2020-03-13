@@ -1,9 +1,9 @@
 { name =
     "purescript-ballista"
 , backend =
-    "cabal run psd -- --foreigns=../std/*/ --foreigns=src/ --main-is=Main --run"
+    "cabal run psd -- --foreigns=../std/*/src/ --foreigns=src/ --main-is=Main --run"
 , dependencies =
-    [ "effect", "console", "psci-support" ]
+    [ "effect", "console", "dart-print", "psci-support" ]
 , packages =
     ./packages.dhall
 , sources =

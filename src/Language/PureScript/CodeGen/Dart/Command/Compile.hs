@@ -109,7 +109,8 @@ compile opts@CommandLineOptions{..} = runShake $ do
     pubspec =
       cloPackageDir </> "pubspec" <.> "yaml"
 
-  -- TODO: Instead liftIO $ newCacheIO () with a unit key
+  --  TODO: Instead liftIO $ newCacheIO () with a unit key
+  --  Or use newCache so that compilation depends on the contents of the PureScript output directory.
   ref <- liftIO $ IORef.newIORef (InMemFileMap mempty mempty mempty mempty)
 
   action $ do
@@ -199,7 +200,7 @@ compile opts@CommandLineOptions{..} = runShake $ do
 
     when cloRun $ case cloMain of
       Nothing ->
-        putInfo "Error: Running requires a main module to be specified via --main-is."
+        putInfo "Error: Specifying --run also requires --main-is."
       Just mn -> do
         putInfo $ "Running binary compiled from " <> mn
         command_ [Cwd $ cloPackageDir </> ".."] "dart" [dartBinaryFileName mn]
@@ -266,8 +267,8 @@ compile opts@CommandLineOptions{..} = runShake $ do
       , "  sdk: '>=2.7.0 <3.0.0'"
       , ""
       , "dev_dependencies:"
-      , "  build_runner: ^1.6.0"
-      , "  build_web_compilers: ^2.3.0"
+--      , "  build_runner: ^1.6.0"
+--      , "  build_web_compilers: ^2.3.0"
       ]
 
   {-
@@ -302,9 +303,9 @@ loadModuleFromJSON :: Text -> Module Ann
 loadModuleFromJSON text =
   case A.parse moduleFromJSON value of
     A.Success (_, r) -> r
-    _ -> internalError "failed to parse JSON value"
+    _ -> internalError "Failed to parse CoreFn JSON value."
   where
-    value = fromMaybe (internalError "ill-formatted CoreFn JSON") $
+    value = fromMaybe (internalError "Found ill-formatted CoreFn JSON.") $
       A.decode . L.encodeUtf8 $ L.fromStrict text
 
 -- TODO: Robust exceptions

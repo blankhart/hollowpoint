@@ -224,7 +224,7 @@ moduleToDart'
     unAbs :: Expr Ann -> [Ident]
     unAbs (Abs _ arg val) = arg : unAbs val
     unAbs _ = []
-  nonRecToJS _ ident@(Ident i) (Abs _ arg val) | i /= "dict" = do
+  nonRecToJS _ ident@(Ident i) (Abs _ arg val) | arg /= Ident "dict" = do
     ret <- valueToJs val
     let jsArg = case arg of
           UnusedIdent -> []
