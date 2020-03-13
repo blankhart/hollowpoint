@@ -5,6 +5,7 @@
   "license": "MIT",
   "scripts": {
     "build": "rm -rf target && spago build",
+    "clean": "rm -rf output target",
     "postinstall": "spago install"
   },
   "dependencies": {

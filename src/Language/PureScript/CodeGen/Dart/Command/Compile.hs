@@ -74,6 +74,8 @@ data InMemFileMap = InMemFileMap
   -- ^ Module name to Dart FFI file.
   , filemapDartTargets :: M.Map FilePath String
   -- ^ Dart foreign target to module.
+  , filemapDartBinaries :: M.Map FilePath String
+  -- ^ Dart foreign binary to module.
   , filemapPursTargets :: M.Map FilePath String
   -- ^ PureScript target to module.
   }
@@ -83,29 +85,38 @@ compile opts@CommandLineOptions{..} = runShake $ do
 
   let
 
-    makeOutputFileName = toTargetFileName cloPackageDir cloLibraryPrefix
+    makeOutputFileName = toTargetFileName "lib" cloPackageDir cloLibraryPrefix
 
     --  Compiled file is required whenever a `CoreFn` module is generated.
-    pursOutputFileName = makeOutputFileName "index"
+    pursOutputFileName =
+      makeOutputFileName "index"
 
     --  Foreign file is required when `CoreFn` module has a non-empty `moduleForeign` field.
-    dartOutputFileName = makeOutputFileName "foreign"
+    dartOutputFileName =
+      makeOutputFileName "foreign"
+
+    dartBinaryFileName =
+      toTargetFileName "bin" cloPackageDir cloLibraryPrefix "exe"
 
     --  Generate build targets
     pursOutputFileNames = pursOutputFileName "**"
-    dartOutputFileNames = dartOutputFileName "**"
+
+    dartOutputFileNames = dartOutputFileName "**" -- lib
+    dartBinaryFileNames = dartBinaryFileName "**" -- bin
+    -- web
 
     --  Bare `pubspec.yaml` is generated when specified on the command line.
     pubspec =
       cloPackageDir </> "pubspec" <.> "yaml"
 
   -- TODO: Instead liftIO $ newCacheIO () with a unit key
-  ref <- liftIO $ IORef.newIORef (InMemFileMap mempty mempty mempty)
+  ref <- liftIO $ IORef.newIORef (InMemFileMap mempty mempty mempty mempty)
 
   action $ do
 
     -- Print version
-    when cloVersion $ putInfo $ "Version: " <> versionString
+    when cloVersion $
+      putInfo $ "Version: " <> versionString
 
     -- Load a map of all modules and all foreign files
     --  `spago`/`purs` generate the `CoreFn` dumps as input to the backend.
@@ -153,9 +164,14 @@ compile opts@CommandLineOptions{..} = runShake $ do
       findSourceName mn =
         M.lookup mn dartSourcesPursFormat <|> M.lookup mn dartSourcesDartFormat
 
+      dartBinaries = case cloMain of
+        Nothing -> mempty
+        Just mn -> M.singleton (dartBinaryFileName mn) mn
+
     liftIO $ IORef.writeIORef ref InMemFileMap
       { filemapDartSources = dartSourcesPursFormat
       , filemapDartTargets = dartTargets
+      , filemapDartBinaries = dartBinaries
       , filemapPursTargets = pursTargets
       }
 
@@ -163,14 +179,30 @@ compile opts@CommandLineOptions{..} = runShake $ do
     -- putInfo $ "Sources: " <> intercalate "," (M.elems dartSources)
     -- putInfo $ "Source names: " <> show dartSourcesPursFormat
 
+    -- Build the Dart libraries from the PureScript modules
     need $ pursOutputFileName <$> pursModuleNames
-    need [pubspec]
 
-    -- It may not be necessary to run this from within the tool as
-    -- the user typically will have its own build script.  But convenient
-    -- perhaps to have under a flag.
-    putInfo $ "Running pub get from " <> cloPackageDir <> "..."
-    command_ [Cwd cloPackageDir] "pub" ["get"]
+    -- Generate executables for main modules
+    -- TODO: Verify that they have main() functions?
+    case cloMain of
+      Nothing -> return ()
+      Just mn -> need [dartBinaryFileName mn]
+
+    -- If not present, generate a `pubspec.yaml` and run `pub get`
+    -- TODO: Make these opt-in or -out through command line switches
+    hasPubSpec <- doesFileExist pubspec
+    unless hasPubSpec $ do
+      putInfo $ "Generating pubspec.yaml in " <> cloPackageDir <> "..."
+      need [pubspec]
+      putInfo $ "Running pub get from " <> cloPackageDir <> "..."
+      command_ [Cwd cloPackageDir] "pub" ["get"]
+
+    when cloRun $ case cloMain of
+      Nothing ->
+        putInfo "Error: Running requires a main module to be specified via --main-is."
+      Just mn -> do
+        putInfo $ "Running binary compiled from " <> mn
+        command_ [Cwd $ cloPackageDir </> ".."] "dart" [dartBinaryFileName mn]
 
   let
     assertValidModuleName filename = fromMaybe $ internalError $
@@ -197,7 +229,7 @@ compile opts@CommandLineOptions{..} = runShake $ do
       ffiRequired = not . null $ moduleForeign modCoreFn
 
     -- TODO:  List input directories searched on failure.
-    --        Keep the list in a cache.
+    --        Keep the globbed list in a factored out cache.
     case ffiTargetFileName of
       Just ffi
         | not ffiRequired -> internalError $
@@ -226,13 +258,43 @@ compile opts@CommandLineOptions{..} = runShake $ do
     putInfo $ "Copying " <> sn <> " to " <> outputPath <> "..."
     copyFileChanged sn outputPath
 
-  -- If specified, generate a `pubspec.yaml`
-  -- Don't go by the package root, but require the package name and
-  -- any non-lib prefix so that import statements can be determined.
-  -- Or have a command to generate the pubspec file.
   pubspec %> \outputPath -> do
     writeFileChanged outputPath $ unlines
       [ "name: " <> cloPackageName
+      , ""
+      , "environment:"
+      , "  sdk: '>=2.7.0 <3.0.0'"
+      , ""
+      , "dev_dependencies:"
+      , "  build_runner: ^1.6.0"
+      , "  build_web_compilers: ^2.3.0"
+      ]
+
+  {-
+  <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title></title>
+        <script defer src="main.dart.js"></script>
+    </head>
+    <body>
+    </body>
+  </html>
+  -}
+
+  dartBinaryFileNames %> \outputPath -> do
+    InMemFileMap{..} <- liftIO $ IORef.readIORef ref
+    let
+      binModuleName = assertValidModuleName outputPath $
+        M.lookup outputPath filemapDartBinaries
+      lib =
+        toTargetImportName cloPackageName cloLibraryPrefix "index" binModuleName
+    writeFileChanged outputPath $ unlines
+      [ "import 'package:" <> lib <> "' as ps;"
+      , "void main() => ps.main;"
       ]
 
 -- Load `CoreFN` JSON representation into a `Module Ann`.

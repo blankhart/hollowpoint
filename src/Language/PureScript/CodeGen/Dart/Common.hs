@@ -21,10 +21,10 @@ toDartFilePath =
   . fmap snakeCase
   . splitOn "."
 
-toTargetFileName :: FilePath -> FilePath -> FilePath -> String -> FilePath
-toTargetFileName packageDir libraryPrefix baseName moduleName =
+toTargetFileName :: String -> FilePath -> FilePath -> FilePath -> String -> FilePath
+toTargetFileName dir packageDir libraryPrefix baseName moduleName =
   packageDir
-  </> "lib"
+  </> dir -- lib, web, bin
   </> libraryPrefix
   </> toDartFilePath moduleName
   </> baseName

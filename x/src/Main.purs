@@ -3,8 +3,8 @@ module Main where
 import Prelude
 
 import Effect (Effect)
-import Trial (log)
+import Effect.Print (print)
 
 main :: Effect Unit
 main = do
-  log "Hello world!"
+  print "Hello world!"

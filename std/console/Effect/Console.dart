@@ -25,10 +25,10 @@ time(s) => () {
   return {};
 };
 
-// FIXME: Not implemented
 timeLog(s) => () {
-//  window.console.timeLog(s);
-  return {};
+// FIXME: window.console.timeLog(s);
+  throw UnimplementedError();
+//  return {};
 };
 
 timeEnd(s) => () {

@@ -85,6 +85,7 @@ cliOptions = CommandLineOptions
   <*> many
     ( option str
       ( long "foreigns"
+      <> short 'd'
       <> help "Package directories for foreign files"
       )
     )
