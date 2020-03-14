@@ -98,7 +98,7 @@ data AST
   | Is (Maybe SourceSpan) AST AST
   -- ^ is check
   | Comment (Maybe SourceSpan) [Comment] AST
-  -- ^ Commented JavaScript
+  -- ^ Commented Dart
   deriving (Show, Eq)
 
 data Directive

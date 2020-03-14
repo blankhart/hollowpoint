@@ -114,14 +114,8 @@ moduleToDart'
                   ]
               else
                 []
-      return $ {- header : -} foreign' ++ jsImports ++ concat optimized
+      return $ foreign' ++ jsImports ++ concat optimized
       {-
-      --  Remove underscores from public identifiers
-      --  Insert missing underscores for private identifiers
-
-      --  Add `show` clauses to exports of foreign modules.
-      --  Or: mimic the JS strategy of constructing new variables that export
-
       let foreignExps = exps `intersect` foreigns
       let standardExps = exps \\ foreignExps
       let exps' = AST.RecordLiteral Nothing $ map (mkString . runIdent &&& AST.Var Nothing . identToJs) standardExps
@@ -428,18 +422,18 @@ moduleToDart'
   varToJs (Qualified Nothing ident) = var ident
   varToJs qual = qualifiedToJS id qual
 
-  -- | Generate code in the simplified JavaScript intermediate representation for a reference to a
-  -- variable that may have a qualified name.
+  -- | Generate code in the simplified JavaScript intermediate representation for a reference to a variable that may have a qualified name.
   qualifiedToJS :: (a -> Ident) -> Qualified a -> AST
   qualifiedToJS f (Qualified (Just (ModuleName [ProperName mn'])) a)
-    | mn' == C.prim = AST.Var Nothing . runIdentDart $ f a
+    | mn' == C.prim = AST.Var Nothing . identToJs $ f a -- was runIdent
   qualifiedToJS f (Qualified (Just mn') a)
     | mn /= mn' =
         objectAccessor (f a) (AST.Var Nothing (moduleNameToJs mn'))
   qualifiedToJS f (Qualified _ a) = AST.Var Nothing $ identToJs (f a)
 
   foreignIdent :: Ident -> AST
-  foreignIdent ident = objectAccessorString (mkString $ runIdentDart ident) (AST.Var Nothing "$foreign")
+  foreignIdent ident =
+    objectAccessorString (mkString $ identToJs ident) (AST.Var Nothing "$foreign") -- was runIdent
 
   -- | Generate code in the simplified JavaScript intermediate representation for pattern match binders and guards.
   --  FIXME: This generates assignment bindings for unused variables in Dart

@@ -328,23 +328,29 @@ However, if the foreign packages are identified by the build system, they could 
 
 There are different modes: Direct load, and side-load foreigns.  Direct load the user's own code or specific-to-Dart packages, but side-load the packages from Pursuit.
 
-    --  Possibly, use the shake system by creating a mapping between the module name/the PureScript output file, and the module name/Dart FFI output file, on each build. Then shake rules can be used while efficiently looking up the relevant mappings.
+Possibly, use the shake system by creating a mapping between the module name/the PureScript output file, and the module name/Dart FFI output file, on each build. Then shake rules can be used while efficiently looking up the relevant mappings.
 
-    --  If there is a main module or modules, then generate a package_dir/bin/main module file that just forwards to the library main file.
+If there is a main module or modules, then generate a package_dir/bin/main module file that just forwards to the library main file.
 
-    --  If the snake case conventions are honored, then module names may not be invertible due to case sensitivity.  Dart requires file names to be snake cased because some file systems are not case sensitive.  In general, PureScript libraries should avoid collisions based on case sensitivity.
+If the snake case conventions are honored, then module names may not be invertible due to case sensitivity.  Dart requires file names to be snake cased because some file systems are not case sensitive.  In general, PureScript libraries should avoid collisions based on case sensitivity.
 
 ### Imports
 
 ### Exports
 
-TODO: It's not entirely clear how module exports work.  The `Module Ann` data type has a `moduleExports` field of type `Ident` rather than `Qualified Ident` so it does not associate an identifier with a particular module.  In order to get that information, it would be necessary to traverse the tree and extract it from variable references.
+Module exports (re-exported names) do not show up in `CoreFn`.  Each module imports only the underlying name it uses, and exports only the names it defines.  The desugaring phase of the PureScript compiler transitively expands module imports to refer to the underlying names rather than reexported names, and erases re-exports from a module's export list.  As a result, it is not necessary for a backend starting from `CoreFn` to handle module exports in the target language.
 
-So this library would have to gather up the exports by identifier and then reexport them.  They should not be able to have a colliding name.
+Dart views each library as implicitly exporting a name, unless the name is prefixed with an underscore.  However, an underscore is a valid PureScript identifier so this could inadvertently result in an exported name becoming invisible in the generated code.
 
-The frontend generates exports  translates module exports to nothing in the printed code, althoguh new bindings that forward to the underlying module, rather than directly exporting from the underlying module.
+As a result, a renaming process should (i) alter public identifiers to eliminate leading underscores, and (ii) alter private identifiers to add leading underscores.
 
-For module exports, desugaring resolves imports through a transitive expansion. As a result, it is not necessary for a backend to handle qualified exports in the target language.
+Renaming public identifiers is necessary to ensure that PureScript compiles to functioning Dart code.  Since exported names are always used qualified in generated code, however, the addition of leading underscores is low priority.  Ensuring privacy here would mainly deter Dart programs from depending on the implementation details of PureScript libraries.
+
+When renaming public identifiers, the simplest solution is to add an initial `$` because this symbol is not a valid PureScript identifier, but is a valid Dart identifier.  As a result, the renamed variable will never conflict with an existing PureScript name.  Additionally, there are no Dart keywords that begin with an underscore.  So the renamed variable also will never conflict with a PureScript identifier that is renamed due to a conflict with a Dart keyword.
+
+If a module has a foreign import with a leading underscore, the same rule would apply -- that is, the foreign name with the leading underscore would be prefixed with `$`.  This will enable it to escape the Dart module for which it was written.  The trap generally would arise only for side-loaded Dart files providing foreign implementations of PureScript modules originally intended for JavaScript or another backend, as Dart-focused modules can avoid leading underscores.
+
+The default backend constructs a record mapping identifiers as string literal keys to valid JavaScript identifiers.  Since the string literals can be anything, they are formed via `runIdent`, while the identifiers are converted to JavaScript via `identToJs`.  This system presupposes that exported names can be declared using any identifier symbols, even if they would not be valid identifiers in the target language.
 
 ## Errors, Warnings, and Lints
 
@@ -373,6 +379,7 @@ The Dart backend should report some errors, but can rely on the Dart analyzer to
 
 -}
 
+The compiler has a utility function [`identCharToText`](https://github.com/purescript/purescript/blob/91886cbf94fb3fa5219fcdc64dd8e189779f51e1/src/Language/PureScript/CodeGen/JS/Common.hs#L62) to convert a variety of symbols to human readable forms. But from that list, only the prime and the underscore seem to be valid characters in an identifier.  For example, it's not clear how a tilde would appear in an identifier, unless it was put there by an earlier compiler pass as happens in some cases with the dollar sign (e.g., `$__unused`). Operators can use these symbols, but must have user-supplied human readable aliases in any case.
 
 ## Notes
 

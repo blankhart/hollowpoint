@@ -3,6 +3,8 @@
 -- | Common code generation utility functions
 module Language.PureScript.CodeGen.Dart.Common where
 
+import Debug.Trace
+
 import Data.Char
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -14,6 +16,8 @@ import System.FilePath ((</>), (<.>))
 import Data.Aeson.Casing (snakeCase)
 import Data.List.Split (splitOn)
 import Data.Foldable (foldl')
+
+-- TODO: Clean a la  https://github.com/csicar/pskt/blob/408f66f55231882f981c03baa69e26921f7ea806/src/CodeGen/KtCore.hs#L121
 
 toDartFilePath :: FilePath -> FilePath
 toDartFilePath =
@@ -48,20 +52,27 @@ moduleNameToJs (ModuleName pns) =
 --  * Alphanumeric characters are kept unmodified.
 --
 --  * Reserved javascript identifiers are prefixed with '$$'.
-identToJs :: Ident -> Text
-identToJs (Ident "undefined") = "null"
-identToJs (Ident name) = anyNameToJs name
-identToJs (GenIdent _ _) = internalError "GenIdent in identToJs"
-identToJs UnusedIdent = "$__unused"
-
+--
 -- This is necessary because "undefined" is effectively built-in to CoreFn.
--- https://github.com/purescript/purescript/blob/ed5fbfb75eb7d85431591d0c889fa8ada7174fd6/src/Language/PureScript/CoreFn/Desugar.hs#L92
+-- https://github.com/purescript/purescript/blob/ed5fbfb75eb7d85431591d0c889fa8ada7174fd6/src/Language/PureScript/CoreFn/Desugar.hs#L92identToJs :: Ident -> Text
+identToJs (Ident "undefined") = "null"
+-- NOTE: Some references to $__unused come through CoreFn
+identToJs (Ident "$__unused") = "_"
+identToJs (Ident name)
+  -- make all identifiers public by default
+  | Just n <- T.stripPrefix "_" name = "$_" <> anyNameToJs n
+  | otherwise = anyNameToJs name
+identToJs (GenIdent _ _) = internalError "GenIdent in identToJs"
+identToJs UnusedIdent = "_"
+
+{-
 runIdentDart :: Ident -> Text
 runIdentDart (Ident "undefined") = "null"
 runIdentDart (Ident i) = i
 runIdentDart (GenIdent Nothing n) = "$" <> T.pack (show n)
 runIdentDart (GenIdent (Just name) n) = "$" <> name <> T.pack (show n)
 runIdentDart UnusedIdent = "$__unused"
+-}
 
 -- | Convert a 'ProperName' into a valid JavaScript identifier:
 --
@@ -80,6 +91,8 @@ properToJs = anyNameToJs . runProperName
 anyNameToJs :: Text -> Text
 anyNameToJs name
   | nameIsJsReserved name || nameIsJsBuiltIn name = "$$" <> name
+   -- should be a null set for proper names, and handled elsewhere for value identifiers, but make all identifiers public by default:
+  | Just underscored <- T.stripPrefix "_" name = "$_" <> anyNameToJs underscored
   | otherwise = T.concatMap identCharToText name
 
 -- | Test if a string is a valid JavaScript identifier as-is. Note that, while
@@ -95,33 +108,11 @@ isValidJsIdentifier s =
     , s == anyNameToJs s
     ]
 
--- | Attempts to find a human-readable name for a symbol, if none has been specified returns the
--- ordinal value.
+-- | Attempts to find a human-readable name for a symbol, if none has been specified returns the ordinal value.
+--  TODO: The only symbols in this list that appear to be valid PureScript identifiers are the prime and the underscore.
 identCharToText :: Char -> Text
-identCharToText c | isAlphaNum c = T.singleton c
-identCharToText '_' = "_"
-identCharToText '.' = "$dot"
-identCharToText '$' = "$dollar"
-identCharToText '~' = "$tilde"
-identCharToText '=' = "$eq"
-identCharToText '<' = "$less"
-identCharToText '>' = "$greater"
-identCharToText '!' = "$bang"
-identCharToText '#' = "$hash"
-identCharToText '%' = "$percent"
-identCharToText '^' = "$up"
-identCharToText '&' = "$amp"
-identCharToText '|' = "$bar"
-identCharToText '*' = "$times"
-identCharToText '/' = "$div"
-identCharToText '+' = "$plus"
-identCharToText '-' = "$minus"
-identCharToText ':' = "$colon"
-identCharToText '\\' = "$bslash"
-identCharToText '?' = "$qmark"
-identCharToText '@' = "$at"
 identCharToText '\'' = "$prime"
-identCharToText c = '$' `T.cons` T.pack (show (ord c))
+identCharToText c = T.singleton c
 
 -- | Checks whether an identifier name is reserved in JavaScript.
 nameIsJsReserved :: Text -> Bool

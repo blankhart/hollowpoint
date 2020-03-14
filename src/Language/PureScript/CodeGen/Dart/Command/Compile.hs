@@ -246,8 +246,9 @@ compile opts@CommandLineOptions{..} = runShake $ do
         Dart.moduleToDart opts cloPackageName cloLibraryPrefix modCoreFn
       modOutput =
         Dart.prettyPrintJS modCoreImp
-
-    writeFileChanged outputPath (T.unpack modOutput)
+      modOutputDisableLints =
+        "// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types\n" <> modOutput
+    writeFileChanged outputPath (T.unpack modOutputDisableLints)
 
   dartOutputFileNames %> \outputPath -> do
     InMemFileMap{..} <- liftIO $ IORef.readIORef ref
@@ -295,7 +296,7 @@ compile opts@CommandLineOptions{..} = runShake $ do
         toTargetImportName cloPackageName cloLibraryPrefix "index" binModuleName
     writeFileChanged outputPath $ unlines
       [ "import 'package:" <> lib <> "' as ps;"
-      , "void main() => ps.main;"
+      , "void main() => ps.main();"
       ]
 
 -- Load `CoreFN` JSON representation into a `Module Ann`.
