@@ -12,15 +12,13 @@ library purescript-dart
   exposed-modules:
     Language.PureScript.CodeGen.Dart
     Language.PureScript.CodeGen.Dart.CoreImp
-    Language.PureScript.CodeGen.Dart.CoreImp2
     Language.PureScript.CodeGen.Dart.CoreImp.AST
+    Language.PureScript.CodeGen.Dart.CoreImp.Optimizer
+    Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.MagicDo
+    Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.TCO
     Language.PureScript.CodeGen.Dart.Command.Compile
     Language.PureScript.CodeGen.Dart.Command.Options
     Language.PureScript.CodeGen.Dart.Common
-    Language.PureScript.CodeGen.Dart.Make.Actions
-    Language.PureScript.CodeGen.Dart.Make.Foreigns
-    Language.PureScript.CodeGen.Dart.Make.Monad
-    Language.PureScript.CodeGen.Dart.Options
     Language.PureScript.CodeGen.Dart.Printer
     Language.PureScript.CodeGen.Dart.String
     Language.PureScript.CodeGen.Dart.Version

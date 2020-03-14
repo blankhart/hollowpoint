@@ -42,11 +42,7 @@ import           System.FilePath.Glob (glob)
 import           System.IO (hClose, hPutStr, hPutStrLn, openFile, IOMode(..), stderr)
 import           System.IO.UTF8 (readUTF8FilesT)
 
-import           Language.PureScript.CodeGen.Dart.Make.Actions as Dart
-import           Language.PureScript.CodeGen.Dart.Make.Foreigns as Dart
-import           Language.PureScript.CodeGen.Dart.Make.Monad as Dart
-
-import qualified Language.PureScript.CodeGen.Dart.CoreImp2 as Dart
+import qualified Language.PureScript.CodeGen.Dart.CoreImp as Dart
 import qualified Language.PureScript.CodeGen.Dart.Printer as Dart
 
 import Language.PureScript.CodeGen.Dart.Common (toTargetFileName, toTargetImportName)

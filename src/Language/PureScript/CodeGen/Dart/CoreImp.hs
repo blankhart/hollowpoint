@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -9,7 +10,7 @@
 module Language.PureScript.CodeGen.Dart.CoreImp
   ( module AST
   , module Common
-  , moduleToJs
+  , moduleToDart
   ) where
 
 -- import Debug.Trace
@@ -19,6 +20,7 @@ import Protolude (ordNub)
 import Control.Monad (forM, replicateM, void)
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.Reader (MonadReader, asks)
+import Control.Monad.Supply (evalSupply)
 import Control.Monad.Supply.Class
 
 import Data.Aeson.Casing (snakeCase)
@@ -46,60 +48,79 @@ import Language.PureScript.Traversals (sndM)
 -- FIXME
 -- import Language.PureScript.CoreImp.Optimizer
 
-import Language.PureScript.CodeGen.Dart.Options as Dart
+import Language.PureScript.CodeGen.Dart.Command.Options as Dart
 import Language.PureScript.CodeGen.Dart.Common as Common
 import qualified Language.PureScript.CodeGen.Dart.CoreImp.AST as AST
 import Language.PureScript.CodeGen.Dart.CoreImp.AST (AST, everywhereTopDownM, withSourceSpan)
 
 import System.FilePath.Posix ((</>))
 
--- | Generate code in the simplified JavaScript intermediate representation for all declarations in a
--- module.
-moduleToJs
-  :: forall m
-   . (Monad m, MonadReader Dart.Options m, MonadSupply m, MonadError MultipleErrors m)
-  => Module Ann
-  -> Maybe Text -- ^ Foreign includes, if any
+moduleToDart
+  :: Dart.CommandLineOptions
+  -> String
+  -> String
+  -> Module Ann
+  -> [AST]
+moduleToDart opts packageName libraryPrefix mod =
+  evalSupply 0 (moduleToDart' opts packageName libraryPrefix mod)
+
+-- | Generate code in the simplified JavaScript intermediate representation for all declarations in a module.
+moduleToDart'
+  :: forall m . (Monad m, MonadSupply m)
+  => Dart.CommandLineOptions
+  -> String
+  -> String
+  -> Module Ann
   -> m [AST]
-moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decls) foreign_ =
-  rethrow (addHint (ErrorInModule mn)) $ do
-    let usedNames = concatMap getNames decls
-    let mnLookup = renameImports usedNames imports
-    let decls' = renameModules mnLookup decls
-    astDecls <- mapM bindToAst decls'
-    -- FIXME
-    -- optimized <- traverse (traverse optimize) astDecls
-    let optimized = astDecls
-    let mnReverseLookup = M.fromList $ map (\(origName, (_, safeName)) -> (moduleNameToJs safeName, origName)) $ M.toList mnLookup
-    let usedModuleNames = foldMap (foldMap (findModules mnReverseLookup)) optimized
-    jsImports <- traverse (importToJs mnLookup)
-      . filter (flip S.member usedModuleNames)
-      . (\\ (mn : C.primModules)) $ ordNub $ map snd imports
-    F.traverse_ (F.traverse_ checkIntegers) optimized
-    --  Remove the use strict annotation and the foreign imports, and replace with a library and foreign import/re-export statement or another suitable scheme. Probably importing a child library is the easiest given namespacing restrictions.  Parallel foreign module with its own library directive.
-    {-
-    -- comments <- not <$> asks optionsNoComments
-    let library = AST.Directive Nothing (AST.Library "index")
-    let header =
-          if comments && not (null coms)
-            then AST.Comment Nothing coms library
-            else library
-    -}
-    -- foreigns represents an AST
-    let foreign' = case foreign_ of
-          Just ffi | not (null foreigns) ->
-            [ AST.Directive Nothing (AST.Import ffi "$foreign")
-            , AST.Directive Nothing (AST.Export ffi [])
-            ]
-          _ ->
-            []
-    return $ {- header : -} foreign' ++ jsImports ++ concat optimized
-    {- Rename these with underscores
-    let foreignExps = exps `intersect` foreigns
-    let standardExps = exps \\ foreignExps
-    let exps' = AST.RecordLiteral Nothing $ map (mkString . runIdent &&& AST.Var Nothing . identToJs) standardExps
-                               ++ map (mkString . runIdent &&& foreignIdent) foreignExps
-    -}
+moduleToDart'
+    CommandLineOptions{..}
+    packageName
+    libraryPrefix
+    (Module _ comments mn _ imports exports foreigns decls)
+    = do
+      let usedNames = concatMap getNames decls
+      let mnLookup = renameImports usedNames imports
+      let decls' = renameModules mnLookup decls
+      astDecls <- mapM bindToAst decls'
+      -- FIXME
+      -- optimized <- traverse (traverse optimize) astDecls
+      let optimized = astDecls
+      let mnReverseLookup = M.fromList $ map (\(origName, (_, safeName)) -> (moduleNameToJs safeName, origName)) $ M.toList mnLookup
+      let usedModuleNames = foldMap (foldMap (findModules mnReverseLookup)) optimized
+      jsImports <- traverse (importToJs mnLookup)
+        . filter (flip S.member usedModuleNames)
+        . (\\ (mn : C.primModules)) $ ordNub $ map snd imports
+      -- F.traverse_ (F.traverse_ checkIntegers) optimized
+      --  Remove the use strict annotation and the foreign imports, and replace with a library and foreign import/re-export statement or another suitable scheme. Probably importing a child library is the easiest given namespacing restrictions.  Parallel foreign module with its own library directive.
+      {-
+      -- comments <- not <$> asks optionsNoComments
+      let library = AST.Directive Nothing (AST.Library "index")
+      let header =
+            if comments && not (null coms)
+              then AST.Comment Nothing coms library
+              else library
+      -}
+      -- foreigns represents an AST
+      let foreign' =
+            if not (null foreigns)
+              then
+                let
+                  moduleName = T.unpack $ runModuleName mn
+                  filename = T.pack $ "package:" <>
+                    (toTargetImportName packageName libraryPrefix "foreign" moduleName)
+                in
+                  [ AST.Directive Nothing (AST.Import filename "$foreign")
+                  , AST.Directive Nothing (AST.Export filename [])
+                  ]
+              else
+                []
+      return $ foreign' ++ jsImports ++ concat optimized
+      {-
+      let foreignExps = exps `intersect` foreigns
+      let standardExps = exps \\ foreignExps
+      let exps' = AST.RecordLiteral Nothing $ map (mkString . runIdent &&& AST.Var Nothing . identToJs) standardExps
+                                  ++ map (mkString . runIdent &&& foreignIdent) foreignExps
+      -}
 
   where
 
@@ -134,10 +155,10 @@ moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decl
   importToJs mnLookup mn' = do
     let
       ((ss, _, _, _), mnSafe) = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-      dartModulePath = foldl' (</>) "" $ snakeCase . T.unpack <$> T.split (=='.') (runModuleName mn')
+      moduleName = T.unpack (runModuleName mn')
     withPos ss $ AST.Directive Nothing
       (AST.Import
-        (fromString ("package:pkg" </> dartModulePath </> "index.dart"))
+        (fromString ("package:" <> toTargetImportName packageName libraryPrefix "index" moduleName))
         (moduleNameToJs mnSafe)
       )
 
@@ -180,8 +201,7 @@ moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decl
   --
   nonRecToJS :: Ann -> Ident -> Expr Ann -> m AST
   nonRecToJS a i e@(extractAnn -> (_, com, _, _)) | not (null com) = do
-    withoutComment <- asks optionsNoComments
-    if withoutComment
+    if cloStripComments
        then nonRecToJS a i (modifyAnn removeComments e)
        else AST.Comment Nothing com <$> nonRecToJS a i (modifyAnn removeComments e)
   -- Dart name collisions possible if typeclasses and data constructors have
@@ -198,7 +218,7 @@ moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decl
     unAbs :: Expr Ann -> [Ident]
     unAbs (Abs _ arg val) = arg : unAbs val
     unAbs _ = []
-  nonRecToJS _ ident@(Ident i) (Abs _ arg val) | i /= "dict" = do
+  nonRecToJS _ ident@(Ident i) (Abs _ arg val) | arg /= Ident "dict" = do
     ret <- valueToJs val
     let jsArg = case arg of
           UnusedIdent -> []
@@ -256,7 +276,7 @@ moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decl
 
   valueToJs' :: Expr Ann -> m AST
   valueToJs' (Literal (pos, _, _, _) l) =
-    rethrowWithPosition pos $ literalToValueJS pos l
+    literalToValueJS pos l
   valueToJs' (Var (_, _, _, Just (IsConstructor _ [])) name) =
     return $ AST.App Nothing (qualifiedToJS id name) []
   valueToJs' (Var (_, _, _, Just (IsConstructor _ _)) name) =
@@ -402,18 +422,18 @@ moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decl
   varToJs (Qualified Nothing ident) = var ident
   varToJs qual = qualifiedToJS id qual
 
-  -- | Generate code in the simplified JavaScript intermediate representation for a reference to a
-  -- variable that may have a qualified name.
+  -- | Generate code in the simplified JavaScript intermediate representation for a reference to a variable that may have a qualified name.
   qualifiedToJS :: (a -> Ident) -> Qualified a -> AST
   qualifiedToJS f (Qualified (Just (ModuleName [ProperName mn'])) a)
-    | mn' == C.prim = AST.Var Nothing . identToJs $ f a
+    | mn' == C.prim = AST.Var Nothing . identToJs $ f a -- was runIdent
   qualifiedToJS f (Qualified (Just mn') a)
     | mn /= mn' =
         objectAccessor (f a) (AST.Var Nothing (moduleNameToJs mn'))
   qualifiedToJS f (Qualified _ a) = AST.Var Nothing $ identToJs (f a)
 
   foreignIdent :: Ident -> AST
-  foreignIdent ident = objectAccessorString (mkString $ identToJs ident) (AST.Var Nothing "$foreign")
+  foreignIdent ident =
+    objectAccessorString (mkString $ identToJs ident) (AST.Var Nothing "$foreign") -- was runIdent
 
   -- | Generate code in the simplified JavaScript intermediate representation for pattern match binders and guards.
   --  FIXME: This generates assignment bindings for unused variables in Dart
@@ -554,23 +574,3 @@ moduleToJs (Module _ _ {- comments -} mn _ imports _ {- exports -} foreigns decl
                   (AST.IntegerLiteral Nothing index)
                   (AST.Var Nothing varName)))
       return $ ev : imp
-
-  -- Check that all integers fall within the valid int range for JavaScript.
-  checkIntegers :: AST -> m ()
-  checkIntegers = void . everywhereTopDownM go
-    where
-    go :: AST -> m AST
-    go (AST.Unary _ AST.Negate (AST.NumericLiteral ss (Left i))) =
-      -- Move the negation inside the literal; since this is a top-down
-      -- traversal doing this replacement will stop the next case from raising
-      -- the error when attempting to use -2147483648, as if left unrewritten
-      -- the value is `Unary Negate (NumericLiteral (Left 2147483648))`, and
-      -- 2147483648 is larger than the maximum allowed int.
-      return $ AST.NumericLiteral ss (Left (-i))
-    go imp@(AST.NumericLiteral ss (Left i)) =
-      let minInt = -2147483648
-          maxInt = 2147483647
-      in if i < minInt || i > maxInt
-         then throwError . maybe errorMessage errorMessage' ss $ IntOutOfRange i "JavaScript" minInt maxInt
-         else return imp
-    go other = return other
