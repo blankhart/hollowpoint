@@ -13,14 +13,16 @@ library purescript-dart
     Language.PureScript.CodeGen.Dart
     Language.PureScript.CodeGen.Dart.CoreImp
     Language.PureScript.CodeGen.Dart.CoreImp.AST
+    Language.PureScript.CodeGen.Dart.CoreImp.Directives
     Language.PureScript.CodeGen.Dart.CoreImp.Optimizer
+    Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Common
+    Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Inliner
     Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.MagicDo
     Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.TCO
+    Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Unused
     Language.PureScript.CodeGen.Dart.Command.Compile
     Language.PureScript.CodeGen.Dart.Command.Options
-    Language.PureScript.CodeGen.Dart.Common
     Language.PureScript.CodeGen.Dart.Printer
-    Language.PureScript.CodeGen.Dart.String
     Language.PureScript.CodeGen.Dart.Version
   other-modules:
     Paths_hollowpoint
@@ -32,6 +34,7 @@ library purescript-dart
     , aeson
     , aeson-casing
     , containers
+    , deriving-compat
     , directory
     , filepath
     , gitrev
@@ -47,7 +50,6 @@ library purescript-dart
     , recursion-schemes
     , safe
     , shake
-    , sourcemap
     , split
     , text
     , time
@@ -56,10 +58,18 @@ library purescript-dart
     , utf8-string
   hs-source-dirs:
     src
-  default-language:
-    Haskell2010
   ghc-options:
     -Wall
+  default-language:
+    Haskell2010
+  default-extensions:
+    FlexibleContexts
+    LambdaCase
+    OverloadedStrings
+    PatternSynonyms
+    RecordWildCards
+    ScopedTypeVariables
+    TupleSections
 
 executable psd
   main-is:
@@ -106,69 +116,3 @@ executable psd
 
   default-language:
     Haskell2010
-
-executable hollowpoint
-  main-is:
-    Main.hs
-  other-modules:
-    Command.Bundle
-    Command.Compile
-    Command.Docs
-    Command.Docs.Html
-    Command.Docs.Markdown
---    Command.Graph
-    Command.Hierarchy
-    Command.Ide
-    Command.Publish
-    Command.REPL
-    Paths_hollowpoint
-    Version
-  hs-source-dirs:
-    app
-  ghc-options:
-    -Wall
---    -O2
-    -fno-warn-unused-do-bind
-    -threaded
-    -rtsopts
-    -with-rtsopts=-N
-  build-depends:
-      base >=4.11 && < 5
-    , base-compat
-    , optparse-applicative
-    , aeson
-    , aeson-pretty
-    , ansi-terminal
-    , ansi-wl-pprint
-    , blaze-html
-    , bytestring
-    , containers
-    , directory
-    , file-embed
-    , filepath
-    , gitrev
-    , Glob
-    , haskeline
-    , http-types
-    , monad-logger
-    , mtl
-    , network >= 3.0.1.1
-    , optparse-applicative >=0.13.0
-    , process
-    , protolude
-    , purescript
-    , purescript-dart
-    , sourcemap
-    , stm
-    , text
-    , time
-    , transformers
-    , utf8-string
-    , wai ==3.*
-    , wai-websockets ==3.*
-    , warp ==3.*
-    , websockets >=0.9 && <0.13
-  default-language:
-    Haskell2010
-
-

@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- | Data types for the imperative core Dart AST
 module Language.PureScript.CodeGen.Dart.CoreImp.AST where
@@ -7,19 +7,83 @@ import Prelude.Compat
 
 import Control.Monad ((>=>))
 import Control.Monad.Identity (Identity(..), runIdentity)
+
+import Data.Functor.Foldable
+import Data.Functor.Foldable.TH
 import Data.Text (Text)
 
-import Language.PureScript.AST (SourceSpan(..))
 import Language.PureScript.Comments
-import Language.PureScript.PSString (PSString)
 import Language.PureScript.Traversals
+
+import Text.Show.Deriving (deriveShow)
+
+-- | Data type for simplified Dart expressions
+-- DAST
+data DartExpr
+  = Directive Directive
+  -- ^ A directive.
+  | NumericLiteral (Either Integer Double)
+  -- ^ A numeric literal
+  | StringLiteral PSString
+  -- ^ A string literal
+  | BooleanLiteral Bool
+  -- ^ A boolean literal
+  | ArrayLiteral [DartExpr]
+  -- ^ An array literal
+  | RecordLiteral [(DartIdent, DartExpr)]
+  -- ^ A record literal
+  | ClassDecl DartIdent [DartIdent]
+  -- ^ A class declaration (name, fields)
+  | FnDecl (Maybe DartIdent) [DartIdent] DartExpr
+  -- ^ A FnDecl introduction (optional name, arguments, body)
+  | FnCall DartExpr [DartExpr]
+  -- ^ FnDecl application
+  | Unary UnaryOperator DartExpr
+  -- ^ A unary operator application
+  | Binary BinaryOperator DartExpr DartExpr
+  -- ^ A binary operator application
+  | Block [DartExpr]
+  -- ^ A block of expressions in braces
+  | VarDecl DartIdent DartExpr
+  -- ^ A variable introduction (always initialized)
+  | VarRef DartIdent
+  -- ^ Variable reference
+  | Accessor Accessor DartExpr DartExpr
+  -- ^ A collection variable accessor (collection var, field identifier)
+  | Reassign DartExpr DartExpr
+  -- ^ A variable reassignment (not initialization)
+  | While DartExpr DartExpr
+  -- ^ While loop
+  | If DartExpr DartExpr (Maybe DartExpr)
+  -- ^ If-then-else statement
+  | Return (Maybe DartExpr)
+  -- ^ Return statement
+  | Throw DartExpr
+  -- ^ Throw statement
+  | Comment [Comment] DartExpr
+  -- ^ Commented Dart
+  | Annotation Text DartExpr
+  -- ^ Annotation (e.g., @pragma())
+  deriving (Show, Eq)
+
+data Directive
+  = Import Text Text -- ^ import "package:purescript/$1/index.dart" as $2
+  | Export Text -- ^ export $1 show $2
+  deriving (Show, Eq)
+
+data Accessor
+  = ArrayIndex
+  -- ^ An array index (integer key)
+  | RecordField
+  -- ^ A record accessor expression (map key)
+  | ObjectMethod
+  -- ^ An object accessor expression (class instance method)
 
 -- | Built-in unary operators
 data UnaryOperator
   = Negate
   | Not
   | BitwiseNot
-  | Positive
   deriving (Show, Eq)
 
 -- | Built-in binary operators
@@ -42,228 +106,88 @@ data BinaryOperator
   | BitwiseXor
   | ShiftLeft
   | ShiftRight
-  | ZeroFillShiftRight
+  | Is
   deriving (Show, Eq)
 
--- | Data type for simplified Dart expressions
-data AST
-  = Directive (Maybe SourceSpan) Directive
-  -- ^ A directive.
-  | NumericLiteral (Maybe SourceSpan) (Either Integer Double)
-  -- ^ A numeric literal
-  | StringLiteral (Maybe SourceSpan) PSString
-  -- ^ A string literal
-  | BooleanLiteral (Maybe SourceSpan) Bool
-  -- ^ A boolean literal
-  | Unary (Maybe SourceSpan) UnaryOperator AST
-  -- ^ A unary operator application
-  | Binary (Maybe SourceSpan) BinaryOperator AST AST
-  -- ^ A binary operator application
-  | ArrayLiteral (Maybe SourceSpan) [AST]
-  -- ^ An array literal
-  | ArrayIndexer (Maybe SourceSpan) AST AST
-  -- ^ An array indexer expression
-  | RecordLiteral (Maybe SourceSpan) [(PSString, AST)]
-  -- ^ A record literal
-  | RecordAccessor (Maybe SourceSpan) AST AST
-  -- ^ A record accessor expression (map key)
-  | ObjectAccessor (Maybe SourceSpan) AST AST
-  -- ^ An object accessor expression (class instance variable)
-  | ClassDeclaration (Maybe SourceSpan) ClassDeclarationType [Superclass] [Text]
-  -- ^ A class declaration (name, extends, fields)
-  | Function (Maybe SourceSpan) (Maybe Text) [Text] AST
-  -- ^ A function introduction (optional name, arguments, body)
-  | App (Maybe SourceSpan) AST [AST]
-  -- ^ Function application
-  | Var (Maybe SourceSpan) Text
-  -- ^ Variable
-  | Block (Maybe SourceSpan) [AST]
-  -- ^ A block of expressions in braces
-  | VariableIntroduction (Maybe SourceSpan) Text (Maybe AST)
-  -- ^ A variable introduction and optional initialization
-  | Assignment (Maybe SourceSpan) AST AST
-  -- ^ A variable assignment
-  | While (Maybe SourceSpan) AST AST
-  -- ^ While loop
-  | For (Maybe SourceSpan) Text AST AST AST
-  -- ^ For loop
-  | IfElse (Maybe SourceSpan) AST AST (Maybe AST)
-  -- ^ If-then-else statement
-  | Return (Maybe SourceSpan) AST
-  -- ^ Return statement
-  | ReturnNoResult (Maybe SourceSpan)
-  -- ^ Return statement with no return value
-  | Throw (Maybe SourceSpan) AST
-  -- ^ Throw statement
-  | Is (Maybe SourceSpan) AST AST
-  -- ^ is check
-  | Comment (Maybe SourceSpan) [Comment] AST
-  -- ^ Commented Dart
-  deriving (Show, Eq)
+class HasOperatorPriority a where
+  priority :: a -> OperatorPriority
 
-data Directive
-  = Library Text
-  | Import Text Text -- ^ import "package:purescript/$1/index.dart" as $2
-  | Export Text [Text] -- ^ export $1 show $2
-  -- TODO: This shouldn't be a directive, but an annotation
-  -- This will require particular subfunctions to return lists of AST
-  -- Or the AST to contain a Stmts [AST] node.
-  -- Otherwise, this could be added as a field to Function
-  | Pragma Text -- ^ @pragma
-  deriving (Show, Eq)
+class HasOperatorPriority UnaryOperator where
+  priority = \case
+    Negate -> NumericSumOp
+    Not -> LogicalSumOp
+    BitwiseNot -> BitwiseSumOp
 
-data ClassDeclarationType
-  = ConcreteClass Text
-  -- | AbstractClass Text
-  -- | Mixin
-  deriving (Show, Eq)
+class HasOperatorPriority BinaryOperator where
+  priority = \case
+    Multiply -> NumericProductOp
+    Divide -> NumericProductOp
+    Modulus -> NumericProductOp
+    Add -> NumericProductOp
+    Subtract -> NumericSumOp
+    ShiftLeft -> BitwiseShiftOp
+    ShiftRight -> BitwiseShiftOp
+    BitwiseAnd -> BitwiseProductOp
+    BitwiseXor -> BitwiseXorOp
+    BitwiseOr -> BitwiseSumOp
+    EqualTo -> ComparisonOp
+    NotEqualTo -> ComparisonOp
+    LessThan -> ComparisonOp
+    LessThanOrEqualTo -> ComparisonOp
+    GreaterThan -> ComparisonOp
+    GreaterThanOrEqualTo -> ComparisonOp
+    Is -> ComparisonOp
+    And -> LogicalProductOp
+    Or -> LogicalSumOp
 
-data Superclass
-  = Extends PSString
-  | With [PSString]
-  | Implements PSString
+data OperatorPriority
+  = LogicalSumOp
+  | LogicalProductOp
+  | ComparisonOp
+  | BitwiseSumOp
+  | BitwiseXorOp
+  | BitwiseProductOp
+  | BitwiseShiftOp
+  | NumericSumOp
+  | NumericProductOp
   deriving (Show, Eq, Ord)
 
-pattern IntegerLiteral :: (Maybe SourceSpan) -> Integer -> AST
-pattern IntegerLiteral ss i = NumericLiteral ss (Left i)
+pattern IntegerLiteral :: Integer -> DartExpr
+pattern IntegerLiteral i = NumericLiteral (Left i)
 
-pattern DoubleLiteral :: (Maybe SourceSpan) -> Double -> AST
-pattern DoubleLiteral ss n = NumericLiteral ss (Right n)
+pattern DoubleLiteral :: Double -> DartExpr
+pattern DoubleLiteral n = NumericLiteral (Right n)
 
-withSourceSpan :: SourceSpan -> AST -> AST
-withSourceSpan withSpan = go where
-  ss :: Maybe SourceSpan
-  ss = Just withSpan
+pattern Lambda :: [Text] -> DartExpr -> DartExpr
+pattern Lambda params body = FnDecl Nothing params body
 
-  go :: AST -> AST
-  go (Directive _ d) = Directive ss d
-  go (NumericLiteral _ n) = NumericLiteral ss n
-  go (StringLiteral _ s) = StringLiteral ss s
-  go (BooleanLiteral _ b) = BooleanLiteral ss b
-  go (Unary _ op j) = Unary ss op j
-  go (Binary _ op j1 j2) = Binary ss op j1 j2
-  go (ArrayLiteral _ js) = ArrayLiteral ss js
-  go (ArrayIndexer _ j1 j2) = ArrayIndexer ss j1 j2
-  go (RecordLiteral _ js) = RecordLiteral ss js
-  go (RecordAccessor _ j1 j2) = RecordAccessor ss j1 j2
-  go (ObjectAccessor _ j1 j2) = ObjectAccessor ss j1 j2
-  go (ClassDeclaration _ j1 j2 j3) = ClassDeclaration ss j1 j2 j3
-  go (Function _ name args j) = Function ss name args j
-  go (App _ j js) = App ss j js
-  go (Var _ s) = Var ss s
-  go (Block _ js) = Block ss js
-  go (VariableIntroduction _ name j) = VariableIntroduction ss name j
-  go (Assignment _ j1 j2) = Assignment ss j1 j2
-  go (While _ j1 j2) = While ss j1 j2
-  go (For _ name j1 j2 j3) = For ss name j1 j2 j3
-  go (IfElse _ j1 j2 j3) = IfElse ss j1 j2 j3
-  go (Return _ js) = Return ss js
-  go (ReturnNoResult _) = ReturnNoResult ss
-  go (Throw _ js) = Throw ss js
-  go (Is _ j1 j2) = Is ss j1 j2
-  go (Comment _ com j) = Comment ss com j
+--  TODO: Possibly wrap this in a block.
+pattern Thunk :: DartExpr -> DartExpr
+pattern Thunk body = Lambda [] body
 
-getSourceSpan :: AST -> Maybe SourceSpan
-getSourceSpan = go where
-  go :: AST -> Maybe SourceSpan
-  go (Directive ss _) = ss
-  go (NumericLiteral ss _) = ss
-  go (StringLiteral ss _) = ss
-  go (BooleanLiteral ss _) = ss
-  go (Unary ss _ _) = ss
-  go (Binary ss _ _ _) = ss
-  go (ArrayLiteral ss _) = ss
-  go (ArrayIndexer ss _ _) = ss
-  go (RecordLiteral ss _) = ss
-  go (RecordAccessor ss _ _) = ss
-  go (ObjectAccessor ss _ _) = ss
-  go (ClassDeclaration ss _ _ _) = ss
-  go (Function ss _ _ _) = ss
-  go (App ss _ _) = ss
-  go (Var ss _) = ss
-  go (Block ss _) = ss
-  go (VariableIntroduction ss _ _) = ss
-  go (Assignment ss _ _) = ss
-  go (While ss _ _) = ss
-  go (For ss _ _ _ _) = ss
-  go (IfElse ss _ _ _) = ss
-  go (Return ss _) = ss
-  go (ReturnNoResult ss) = ss
-  go (Throw ss _) = ss
-  go (Is ss _ _) = ss
-  go (Comment ss _ _) = ss
+pattern ArrayAccessor :: Integer -> DartExpr -> DartExpr
+pattern ArrayAccessor ix var = Accessor ArrayIndex (IntegerLiteral ix) var
 
-everywhere :: (AST -> AST) -> AST -> AST
-everywhere f = go where
-  go :: AST -> AST
-  go (Unary ss op j) = f (Unary ss op (go j))
-  go (Binary ss op j1 j2) = f (Binary ss op (go j1) (go j2))
-  go (ArrayLiteral ss js) = f (ArrayLiteral ss (map go js))
-  go (ArrayIndexer ss j1 j2) = f (ArrayIndexer ss (go j1) (go j2))
-  go (RecordLiteral ss js) = f (RecordLiteral ss (map (fmap go) js))
-  go (RecordAccessor ss j1 j2) = f (RecordAccessor ss (go j1) (go j2))
-  go (ObjectAccessor ss j1 j2) = f (ObjectAccessor ss (go j1) (go j2))
-  go (Function ss name args j) = f (Function ss name args (go j))
-  go (App ss j js) = f (App ss (go j) (map go js))
-  go (Block ss js) = f (Block ss (map go js))
-  go (VariableIntroduction ss name j) = f (VariableIntroduction ss name (fmap go j))
-  go (Assignment ss j1 j2) = f (Assignment ss (go j1) (go j2))
-  go (While ss j1 j2) = f (While ss (go j1) (go j2))
-  go (For ss name j1 j2 j3) = f (For ss name (go j1) (go j2) (go j3))
-  go (IfElse ss j1 j2 j3) = f (IfElse ss (go j1) (go j2) (fmap go j3))
-  go (Return ss js) = f (Return ss (go js))
-  go (Throw ss js) = f (Throw ss (go js))
-  go (Is ss j1 j2) = f (Is ss (go j1) (go j2))
-  go (Comment ss com j) = f (Comment ss com (go j))
-  go other = f other
+pattern RecordAccessor :: Text -> DartExpr -> DartExpr
+pattern RecordAccessor txt var = Accessor RecordField (StringLiteral txt) var
 
-everywhereTopDown :: (AST -> AST) -> AST -> AST
-everywhereTopDown f = runIdentity . everywhereTopDownM (Identity . f)
+pattern ObjectAccessor :: DartIdent -> DartExpr -> DartExpr
+pattern ObjectAccessor i var = Accessor ObjectMethod (VarRef i) var
 
-everywhereTopDownM :: (Monad m) => (AST -> m AST) -> AST -> m AST
-everywhereTopDownM f = f >=> go where
-  f' = f >=> go
-  go (Unary ss op j) = Unary ss op <$> f' j
-  go (Binary ss op j1 j2) = Binary ss op <$> f' j1 <*> f' j2
-  go (ArrayLiteral ss js) = ArrayLiteral ss <$> traverse f' js
-  go (ArrayIndexer ss j1 j2) = ArrayIndexer ss <$> f' j1 <*> f' j2
-  go (RecordLiteral ss js) = RecordLiteral ss <$> traverse (sndM f') js
-  go (RecordAccessor ss j1 j2) = RecordAccessor ss <$> f' j1 <*> f' j2
-  go (ObjectAccessor ss j1 j2) = ObjectAccessor ss <$> f' j1 <*> f' j2
-  go (Function ss name args j) = Function ss name args <$> f' j
-  go (App ss j js) = App ss <$> f' j <*> traverse f' js
-  go (Block ss js) = Block ss <$> traverse f' js
-  go (VariableIntroduction ss name j) = VariableIntroduction ss name <$> traverse f' j
-  go (Assignment ss j1 j2) = Assignment ss <$> f' j1 <*> f' j2
-  go (While ss j1 j2) = While ss <$> f' j1 <*> f' j2
-  go (For ss name j1 j2 j3) = For ss name <$> f' j1 <*> f' j2 <*> f' j3
-  go (IfElse ss j1 j2 j3) = IfElse ss <$> f' j1 <*> f' j2 <*> traverse f' j3
-  go (Return ss j) = Return ss <$> f' j
-  go (Throw ss j) = Throw ss <$> f' j
-  go (Is ss j1 j2) = Is ss <$> f' j1 <*> f' j2
-  go (Comment ss com j) = Comment ss com <$> f' j
-  go other = f other
+pattern MethodCall :: DartExpr -> DartIdent -> [DartExpr] -> DartExpr
+pattern MethodCall obj method args = FnCall (ObjectAccessor method obj) args
 
-everything :: (r -> r -> r) -> (AST -> r) -> AST -> r
-everything (<>.) f = go where
-  go j@(Unary _ _ j1) = f j <>. go j1
-  go j@(Binary _ _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(ArrayLiteral _ js) = foldl (<>.) (f j) (map go js)
-  go j@(ArrayIndexer _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(RecordLiteral _ js) = foldl (<>.) (f j) (map (go . snd) js)
-  go j@(RecordAccessor _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(ObjectAccessor _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(Function _ _ _ j1) = f j <>. go j1
-  go j@(App _ j1 js) = foldl (<>.) (f j <>. go j1) (map go js)
-  go j@(Block _ js) = foldl (<>.) (f j) (map go js)
-  go j@(VariableIntroduction _ _ (Just j1)) = f j <>. go j1
-  go j@(Assignment _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(While _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(For _ _ j1 j2 j3) = f j <>. go j1 <>. go j2 <>. go j3
-  go j@(IfElse _ j1 j2 Nothing) = f j <>. go j1 <>. go j2
-  go j@(IfElse _ j1 j2 (Just j3)) = f j <>. go j1 <>. go j2 <>. go j3
-  go j@(Return _ j1) = f j <>. go j1
-  go j@(Throw _ j1) = f j <>. go j1
-  go j@(Is _ j1 j2) = f j <>. go j1 <>. go j2
-  go j@(Comment _ _ j1) = f j <>. go j1
-  go other = f other
+pattern IfThen :: DartExpr -> DartExpr -> DartExpr -> DartExpr
+pattern IfThen cond thens = If cond thens Nothing
+
+pattern IfEqual :: DartExpr -> DartExpr -> DartExpr -> DartExpr
+pattern IfEqual a b thens = If (Binary EqualTo a b) thens Nothing
+
+pattern IfThenElse :: DartExpr -> DartExpr -> DartExpr -> DartExpr -> DartExpr
+pattern IfThenElse cond thens elses = If cond thens (Just elses)
+
+pattern IIFE :: DartExpr -> DartExpr
+pattern IIFE body = FnCall (Lambda [] (Block body)) []
+
+makeBaseFunctor ''ImpF
+deriveShow ''ImpF

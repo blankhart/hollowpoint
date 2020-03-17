@@ -305,6 +305,16 @@ final dynamic absurd = (a) {
 
 Here `spin` is invalid, even though it is accepted as a top-level variable.
 
+But this works:
+
+```dart
+spin(a) => (b) {
+  return spin(a)(b-1);
+};
+```
+
+A function declaration must carry a semicolon if it is declared without fat-arrow syntax, i.e., because it has zero or one arguments.
+
 The most legible rendering of foreign functions in Dart would be as follows:
 
 ```dart
@@ -380,6 +390,10 @@ The Dart backend should report some errors, but can rely on the Dart analyzer to
 -}
 
 The compiler has a utility function [`identCharToText`](https://github.com/purescript/purescript/blob/91886cbf94fb3fa5219fcdc64dd8e189779f51e1/src/Language/PureScript/CodeGen/JS/Common.hs#L62) to convert a variety of symbols to human readable forms. But from that list, only the prime and the underscore seem to be valid characters in an identifier.  For example, it's not clear how a tilde would appear in an identifier, unless it was put there by an earlier compiler pass as happens in some cases with the dollar sign (e.g., `$__unused`). Operators can use these symbols, but must have user-supplied human readable aliases in any case.
+
+Dart name collisions possible if typeclasses and data constructors have different namespaces, but that would also be the case for JavaScript where both are functions.
+
+TODO: Typeclass renderings don't need the curried "create" function.
 
 ## Notes
 

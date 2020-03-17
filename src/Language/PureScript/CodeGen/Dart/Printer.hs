@@ -1,374 +1,237 @@
-{-# LANGUAGE OverloadedStrings #-}
+module Language.PureScript.CodeGen.Dart.Printer (printModule) where
 
--- | Pretty printer for the Dart AST
-module Language.PureScript.CodeGen.Dart.Printer
-  ( prettyPrintJS
-  , prettyPrintJSWithSourceMaps
-  ) where
-
--- FIXME: Remove, but note absence of exhaustivity checks with this API.
--- import Debug.Trace (traceShow)
-
-import Control.Arrow ((<+>))
 import Control.Monad (forM, mzero)
-import Control.Monad.State (StateT, evalStateT)
-import Control.PatternArrows
-import qualified Control.Arrow as A
 
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Prettyprint.Doc
+import Data.Word (Word16)
 
-import Language.PureScript.AST (SourceSpan(..))
 import Language.PureScript.Comments
 import Language.PureScript.Crash
 import Language.PureScript.Pretty.Common
 import Language.PureScript.PSString (PSString, decodeString)
 import Language.PureScript.CodeGen.Dart.Common
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
-import Language.PureScript.CodeGen.Dart.String as Dart
 
-prettyPrintJS :: [AST] -> Text
-prettyPrintJS = maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0) . prettyStatements
+import Numeric (showHex)
 
-literals :: (Emit gen) => Pattern PrinterState AST gen
-literals = mkPattern' match'
-  where
-  match' :: (Emit gen) => AST -> StateT PrinterState Maybe gen
-  match' js = (addMapping' (getSourceSpan js) <>) <$> match js
+printModule :: [DartExpr] -> Text
+printModule decls = foldMap (<>) (pretty <$> decls)
 
-  match :: (Emit gen) => AST -> StateT PrinterState Maybe gen
-
-  -- FIXME: Package system, module naming, etc.
-  match (Directive _ d) = return $ case d of
-    Library lib -> emit $ "library " <> lib
-    Import lib qual -> emit $ "import \'" <> lib <> "\' as " <> qual
-    Export lib _ -> emit $ "export \'" <> lib <> "\'"
-    Pragma p -> emit $ "@pragma('" <> p <> "')"
-
-  match (NumericLiteral _ n) = return $ emit $ T.pack $ either show show n
-
-  match (StringLiteral _ s) = return $ emit $ Dart.prettyPrintString s
-
-  match (BooleanLiteral _ True) = return $ emit "true"
-
-  match (BooleanLiteral _ False) = return $ emit "false"
-
-  match (ArrayLiteral _ xs) = mconcat <$> sequence
-    [ return $ emit "[ "
-    , intercalate (emit ", ") <$> forM xs prettyPrintJS'
-    , return $ emit " ]"
-    ]
-
-  match (RecordLiteral _ []) = return $ emit "{}"
-
-  match (RecordLiteral _ ps) = mconcat <$> sequence
-    [ return $ emit "{\n"
-    , withIndent $ do
-        jss <- forM ps $ \(key, value) ->
-          fmap ((toRecordKey key <> emit ": ") <>) . prettyPrintJS' $ value
-        indentString <- currentIndent
-        return $ intercalate (emit ",\n") $ map (indentString <>) jss
-    , return $ emit "\n"
-    , currentIndent
-    , return $ emit "}"
-    ]
+instance Pretty DartExpr where
+  pretty e = case e of
+    FnDecl _ _ inner -> case inner of
+      --  TODO: Fat arrows for literals, operators etc. not nested inside return blocks also would be statements
+      FnDecl{} -> statement
+      _ -> declaration
+    ClassDecl{} -> declaration
+    While{} -> declaration
+    _ -> statement
     where
-    toRecordKey :: (Emit gen) => PSString -> gen
-    toRecordKey s = emit "'" <> emit key <> emit "'"
+      statement = printExpr e <> ";"
+      declaration = printExpr e
+
+printExpr :: DartExpr -> Doc ()
+printExpr = \case
+
+  Directive (Import lib name) ->
+    "import" <+> squotes (pretty lib) <+> "as" <+> pretty qual
+
+  Directive (Export lib) ->
+    "export" <+> squotes (pretty lib)
+
+  IntegerLiteral i ->
+    pretty i
+
+  -- TODO: Review whether this always produces correct Dart
+  DoubleLiteral d ->
+    pretty d
+
+  StringLiteral ps ->
+    pretty ps
+
+  BooleanLiteral b -> case b of
+    True -> "true"
+    False -> "false"
+
+  ArrayLiteral es ->
+    -- TODO: Break across lines in appropriate cases
+    brackets (punctuate "," (pretty <$> es))
+
+  RecordLiteral kvs -> case kvs of
+    [] -> "{}"
+    ps -> braces $ align $ vsep $ punctuate comma $ assign <$> kvs
+    where
+      assign (key, value) = squotes (pretty key) <+> ":" <+> pretty value
+
+  ClassDecl name fields ->
+    "class" <+> pretty c <+> blockedDecls bodyDecls
+    where
+      bodyDecls =
+        concat [fieldDecls, ctorDecl, createDecl]
+      fieldDecls =
+        fmap (\f -> "final dynamic" <+> pretty f) fields
+      ctorDecl =
+        "const" <+> c <> uncurriedArgs (fmap ("this." <>) fields)
+      createDecl =
+        "static dynamic get create =>" <+> curriedArgs fields <+> ctorCall
+      ctorCall =
+        c <> uncurriedArgs fs <> ";"
+
+  -- TODO: Integrate with AST pass that converts single-expression functions
+  -- into lambdas.
+  FnDecl fn args body ->
+    pretty fn <> uncurriedArgs args <+> (const "=>" <$> arrow) <+> pretty body
+    where
+      arrow = case body of
+        FnDecl{} -> Just ()
+        _ -> Nothing
+
+  FnCall fn args ->
+    pretty fn <> uncurriedArgs args
+
+  Unary op e ->
+    pretty op <> smartParens op e
+
+  Binary op lhs rhs ->
+    smartParens op lhs <+> pretty op <+> smartParens op rhs
+
+  Block es ->
+    blockedDecls es
+
+  VarDecl name expr ->
+    -- FIXME: This will fail for a mutable TCO variable.
+    -- TODO: If expr is a literal, this can be declared const
+    -- unless it is part of the TCO optimization and needs the ability
+    -- to be reassigneds
+    "final" <+> pretty name <+> "=" <+> pretty expr
+
+  VarRef name ->
+    pretty name
+
+  Accessor ArrayIndex index name ->
+    pretty name <> brackets (pretty index)
+
+  Accessor RecordField field name ->
+    pretty name <> brackets (pretty field)
+
+  Accessor ObjectMethod method name ->
+    pretty name <> "." <> pretty method
+
+  Reassign name expr ->
+    pretty name <+> "=" <+> pretty expr
+
+  While cond body ->
+    "while" <+> parens (pretty cond) <+> pretty body
+
+  If cond thens elses ->
+    "if" <+> parens (pretty cond)
+      <> pretty thens
+      <> maybe "" (\e -> "else" <+> pretty e) elses
+
+  Return e ->
+    "return" <+> pretty e
+
+  Throw e ->
+    "throw" <+> pretty e
+
+  Comment coms decl ->
+    vsep (pretty <$> coms) <> line <> pretty decl
+
+  Annotation ann e ->
+    "@" <> pretty ann <> line <> pretty e
+
+instance Pretty UnaryOperator where
+  pretty op = pretty $ case op of
+    Negate -> "-"
+    Not -> "!"
+    BitwiseNot -> "~"
+
+instance Pretty BinaryOperator where
+  pretty op = pretty $ case op of
+    -- Precedence class
+    Multiply -> "*"
+    Divide -> "/"
+    Modulus -> "%"
+    -- Precedence class
+    Add -> "+"
+    Subtract -> "-"
+    -- Precedence class
+    ShiftLeft -> "<<"
+    ShiftRight -> ">>"
+    -- Precedence class
+    BitwiseAnd -> "&"
+    -- Precedence class
+    BitwiseXor -> "^"
+    -- Precedence class
+    BitwiseOr -> "|"
+    -- Precedence class
+    EqualTo -> "=="
+    NotEqualTo -> "!="
+    LessThan -> "<"
+    LessThanOrEqualTo -> "<="
+    GreaterThan -> ">"
+    GreaterThanOrEqualTo -> ">="
+    Is -> "is"
+    -- Precedence class
+    And -> "&&"
+    Or -> "||"
+
+-- | Pretty-print a PSString using Dart escape sequences.
+-- Intended for use in compiled Dart output.
+-- FIXME: Adapt to Dart strings
+instance Pretty PSString where
+  pretty s = "\'" <> foldMap encodeChar (toUTF16CodeUnits s) <> "\'"
+    where
+      encodeChar :: Word16 -> Text
+      encodeChar c | c > 0xFF = "\\u" <> showHex' 4 c
+      encodeChar c | c > 0x7E || c < 0x20 = "\\x" <> showHex' 2 c
+      encodeChar c | toChar c == '\b' = "\\b"
+      encodeChar c | toChar c == '\t' = "\\t"
+      encodeChar c | toChar c == '\n' = "\\n"
+      encodeChar c | toChar c == '\v' = "\\v"
+      encodeChar c | toChar c == '\f' = "\\f"
+      encodeChar c | toChar c == '\r' = "\\r"
+      encodeChar c | toChar c == '"'  = "\\\""
+      encodeChar c | toChar c == '\\' = "\\\\"
+      encodeChar c = Text.singleton $ toChar c
+
+      showHex' :: Enum a => Int -> a -> Text
+      showHex' width c =
+        let hs = showHex (fromEnum c) "" in
+        T.pack (replicate (width - length hs) '0' <> hs)
+
+      toChar :: Word16 -> Char
+      toChar = toEnum . fromIntegral
+
+instance Pretty Comment where
+  pretty = \case
+    LineComment com -> "//" <+> pretty com
+    BlockComment com -> "/**" <> line <> vsep clines <> line <> "*/"
       where
-      -- TODO: Review whether the identifier restriction is needed
-      -- if these are Map<String, dynamic>
-      key = case decodeString s of
-        Just s' | isValidJsIdentifier s' -> s'
-        _ -> Dart.prettyPrintString s
+        clines = fmap (" * " <>) T.unlines com
+    -- FIXME: Ensure block comments does not include "*/"
 
-  match (Block _ sts) = mconcat <$> sequence
-    [ return $ emit "{\n"
-    , withIndent $ prettyStatements sts
-    , return $ emit "\n"
-    , currentIndent
-    , return $ emit "}"
-    ]
+instance Pretty DartIdent where
+  pretty = pretty . runDartIdent
 
-  match (Var _ ident) = return $ emit ident
+uncurriedArgs :: [Doc ()] -> Doc ()
+uncurriedArgs = parens . hsep . punctuate ","
 
-  match (VariableIntroduction _ ident value) = mconcat <$> sequence
-    [ return $ emit $ case value of
-        -- This is just because the Dart analyzer cannot infer the type of
-        -- a block-bodied function.  The Dart common front end is said to have
-        -- this capability.
-        Just (Function _ _ _ _) -> "final dynamic " <> ident
-        _ -> "final " <> ident
-    , maybe (return mempty) (fmap (emit " = " <>) . prettyPrintJS') value
-    ]
+curriedArgs :: [Doc ()] -> Doc ()
+curriedArgs = concatWith (surround " => ") . fmap parens
 
-  match (Assignment _ target value) = mconcat <$> sequence
-    [ prettyPrintJS' target
-    , return $ emit " = "
-    , prettyPrintJS' value
-    ]
+blockedDecls :: [Doc ()] -> Doc ()
+blockedDecls decls = braces $ line <> indent margin (align (vsep decls)) <> line
 
-  match (While _ cond sts) = mconcat <$> sequence
-    [ return $ emit "while ("
-    , prettyPrintJS' cond
-    , return $ emit ") "
-    , prettyPrintJS' sts
-    ]
+smartParens :: HasOperatorPriority o => o -> DartExpr -> Doc ()
+smartParens op expr = case expr of
+  Unary o | priority o <= priority op -> parens expr
+  Binary o _ _ | priority o <= priority op -> parens expr
+  _ -> expr
 
-  match (For _ ident start end sts) = mconcat <$> sequence
-    [ return $ emit $ "for (var " <> ident <> " = "
-    , prettyPrintJS' start
-    , return $ emit $ "; " <> ident <> " < "
-    , prettyPrintJS' end
-    , return $ emit $ "; " <> ident <> "++) "
-    , prettyPrintJS' sts
-    ]
-
-  match (IfElse _ cond thens elses) = mconcat <$> sequence
-    [ return $ emit "if ("
-    , prettyPrintJS' cond
-    , return $ emit ") "
-    , prettyPrintJS' thens
-    , maybe (return mempty) (fmap (emit " else " <>) . prettyPrintJS') elses
-    ]
-
-  match (Return _ value) = mconcat <$> sequence
-    [ return $ emit "return "
-    , prettyPrintJS' value
-    ]
-
-  match (ReturnNoResult _) = return $ emit "return"
-
-  match (Throw _ value) = mconcat <$> sequence
-    [ return $ emit "throw "
-    , prettyPrintJS' value
-    ]
-
-  match (Comment _ com js) = mconcat <$> sequence
-    [ return $ emit "\n"
-    , mconcat <$> forM com comment
-    , prettyPrintJS' js
-    ]
-
-  -- FIXME: Ignoring superclasses (types)
-  -- return $ emit "@sealed" -- only relevant to type, not constructor
-  -- and so would decorate a parent abstract class
-  -- FIXME: Review whether nullaries should have a static member, since "const constructors" do not return constant objects (they are just capable of doing so).
-  -- FIXME: Longer-term, possible use of enums for appropriate types.
-  match (ClassDeclaration _ (ConcreteClass c) _ fields) =
-    mconcat <$> sequence
-      [ return $ emit ("class " <> c <> " {\n")
-      , withIndent $ do
-          i <- currentIndent
-          mconcat <$> sequence
-            [ return $ mconcat $ flip fmap fields $ \field ->
-              i <> emit ("final dynamic " <> field <> ";\n")
-            , let initializers = intercalate ", " (fmap ("this." <>) fields)
-              in  return $
-                    i <> emit "const " <> emit (c <> "(" <> initializers <> ");\n")
-            -- The curried constructor.  Note, typeclass constructors will
-            -- always be applied fully saturated and so don't need this, even
-            -- though they take multiple arguments.
-            , let
-                ind n = T.replicate n "    "
-                call = c <> "(" <> T.intercalate ", " fields <> ");\n"
-                (ctor, _) = foldr curried (call, length fields) fields
-                curried arg (acc, n) = (acc', n - 1)
-                  where
-                    acc' = "(" <> arg <> ") {\n"
-                      <> ind (n + 1) <> "return " <> acc
-                      <> ind n <> "};\n"
-              in if null fields
-                  then return $ emit ""
-                  else
-                    return $
-                      i <> emit ("static dynamic get create => " <> ctor)
-            , return $ emit "}"
-            ]
-      ]
-
-  -- NOTE: This can produce an infinite loop if it fails to match.
-  match _ = mzero
-  -- match q = traceShow q $ mzero
-
-  comment :: (Emit gen) => Comment -> StateT PrinterState Maybe gen
-  comment (LineComment com) = fmap mconcat $ sequence $
-    [ currentIndent
-    , return $ emit "//" <> emit com <> emit "\n"
-    ]
-  comment (BlockComment com) = fmap mconcat $ sequence $
-    [ currentIndent
-    , return $ emit "/**\n"
-    ] ++
-    map asLine (T.lines com) ++
-    [ currentIndent
-    , return $ emit " */\n"
-    , currentIndent
-    ]
-    where
-    asLine :: (Emit gen) => Text -> StateT PrinterState Maybe gen
-    asLine s = do
-      i <- currentIndent
-      return $ i <> emit " * " <> (emit . removeComments) s <> emit "\n"
-
-    removeComments :: Text -> Text
-    removeComments t =
-      case T.stripPrefix "*/" t of
-        Just rest -> removeComments rest
-        Nothing -> case T.uncons t of
-          Just (x, xs) -> x `T.cons` removeComments xs
-          Nothing -> ""
-
--- FIXME
--- Very clunky
-recordAccessor :: Pattern PrinterState AST (Text, AST)
-recordAccessor = mkPattern match
-  where
-  match (RecordAccessor _ (StringLiteral _ prop) val) =
-    case decodeString prop of
-      Just s | isValidJsIdentifier s -> Just (s, val)
-      _ -> Nothing
-  match _ = Nothing
-
-objectAccessor :: Pattern PrinterState AST (Text, AST)
-objectAccessor = mkPattern match
-  where
-  match (ObjectAccessor _ (StringLiteral _ prop) val) =
-    case decodeString prop of
-      Just s | isValidJsIdentifier s -> Just (s, val)
-      -- NOTE: This was nasty to track down.  Reserved words must be
-      -- converted on the same basis.
-             | otherwise -> Just (anyNameToJs s, val)
-      _ -> Nothing
-  match _ = Nothing
-
--- FIXME
-indexer :: (Emit gen) => Pattern PrinterState AST (gen, AST)
-indexer = mkPattern' match
-  where
-  match (ArrayIndexer _ index val) =
---    traceShow (index, val) $
-    (,) <$> prettyPrintJS' index <*> pure val
-  match (RecordAccessor _ index val) =
---    traceShow (index, val) $
-    (,) <$> prettyPrintJS' index <*> pure val
-  match (ObjectAccessor _ index val) =
---    traceShow (index, val) $
-    (,) <$> prettyPrintJS' index <*> pure val
-  match _ = mzero
-
-lam :: Pattern PrinterState AST ((Maybe Text, [Text], Maybe SourceSpan), AST)
-lam = mkPattern match
-  where
-  match (Function ss name args ret) = Just ((name, args, ss), ret)
-  match _ = Nothing
-
-app :: (Emit gen) => Pattern PrinterState AST (gen, AST)
-app = mkPattern' match
-  where
-  match (App _ val args) = do
-    jss <- traverse prettyPrintJS' args
-    return (intercalate (emit ", ") jss, val)
-  match _ = mzero
-
-is :: Pattern PrinterState AST (AST, AST)
-is = mkPattern match
-  where
-  match (Is _ val ty) = Just (val, ty)
-  match _ = Nothing
-
-unary' :: (Emit gen) => UnaryOperator -> (AST -> Text) -> Operator PrinterState AST gen
-unary' op mkStr = Wrap match (<>)
-  where
-  match :: (Emit gen) => Pattern PrinterState AST (gen, AST)
-  match = mkPattern match'
-    where
-    match' (Unary _ op' val) | op' == op = Just (emit $ mkStr val, val)
-    match' _ = Nothing
-
-unary :: (Emit gen) => UnaryOperator -> Text -> Operator PrinterState AST gen
-unary op str = unary' op (const str)
-
-negateOperator :: (Emit gen) => Operator PrinterState AST gen
-negateOperator = unary' Negate (\v -> if isNegate v then "- " else "-")
-  where
-  isNegate (Unary _ Negate _) = True
-  isNegate _ = False
-
-binary :: (Emit gen) => BinaryOperator -> Text -> Operator PrinterState AST gen
-binary op str = AssocL match (\v1 v2 -> v1 <> emit (" " <> str <> " ") <> v2)
-  where
-  match :: Pattern PrinterState AST (AST, AST)
-  match = mkPattern match'
-    where
-    match' (Binary _ op' v1 v2) | op' == op = Just (v1, v2)
-    match' _ = Nothing
-
--- This adds semicolons after every statement.
-prettyStatements :: (Emit gen) => [AST] -> StateT PrinterState Maybe gen
-prettyStatements sts = do
-  jss <- forM sts prettyPrintJS'
-  indentString <- currentIndent
-  let declFlags = map isDecl sts
-      isDecl (ClassDeclaration _ _ _ _) = True
-      isDecl (Function _ (Just _) _ _) = True
-      isDecl _ = False
-      fmtStmt js decl = case decl of
-        True -> indentString <> js
-        False -> indentString <> js <> emit ";"
-  return $ intercalate (emit "\n") $
-    zipWith fmtStmt jss declFlags
-
--- | Generate a pretty-printed string representing a collection of JavaScript expressions at the same indentation level
-prettyPrintJSWithSourceMaps :: [AST] -> (Text, [SMap])
-prettyPrintJSWithSourceMaps js =
-  let StrPos (_, s, mp) = (fromMaybe (internalError "Incomplete pattern") . flip evalStateT (PrinterState 0) . prettyStatements) js
-  in (s, mp)
-
--- | Generate an indented, pretty-printed string representing a JavaScript expression
-prettyPrintJS' :: (Emit gen) => AST -> StateT PrinterState Maybe gen
-prettyPrintJS' = A.runKleisli $ runPattern matchValue
-  where
-  matchValue :: (Emit gen) => Pattern PrinterState AST gen
-  matchValue = buildPrettyPrinter operators (literals <+> fmap parensPos matchValue)
-  operators :: (Emit gen) => OperatorTable PrinterState AST gen
-  operators =
-    OperatorTable [ [ Wrap indexer $ \index val ->
-                        val <> emit "[" <> index <> emit "]" ]
-                  , [ Wrap recordAccessor $ \prop val ->
-                        val <> emit "['" <> emit prop <> emit "']" ]
-                  , [ Wrap objectAccessor $ \prop val ->
-                        val <> emit "." <> emit prop ]
-                  , [ Wrap app $ \args val ->
-                        val <> emit "(" <> args <> emit ")" ]
-                  , [ Wrap lam $ \(name, args, ss) ret ->
-                        addMapping' ss <>
-                          emit (fromMaybe "" name
-                          <> "(" <> intercalate ", " args <> ") ")
-                          <> ret ]
-                  , [ unary     Not                  "!"
-                    , unary     BitwiseNot           "~"
-                    , unary     Positive             "+"
-                    , negateOperator ]
-                  , [ binary    Multiply             "*"
-                    , binary    Divide               "/"
-                    , binary    Modulus              "%" ]
-                  , [ binary    Add                  "+"
-                    , binary    Subtract             "-" ]
-                  , [ binary    ShiftLeft            "<<"
-                    , binary    ShiftRight           ">>"
-                    , binary    ZeroFillShiftRight   ">>>" ]
-                  , [ binary    LessThan             "<"
-                    , binary    LessThanOrEqualTo    "<="
-                    , binary    GreaterThan          ">"
-                    , binary    GreaterThanOrEqualTo ">="
-                    , AssocR is $ \v1 v2 -> v1 <> emit " is " <> v2 ]
-                  , [ binary    EqualTo              "=="
-                    , binary    NotEqualTo           "!=" ]
-                  , [ binary    BitwiseAnd           "&" ]
-                  , [ binary    BitwiseXor           "^" ]
-                  , [ binary    BitwiseOr            "|" ]
-                  , [ binary    And                  "&&" ]
-                  , [ binary    Or                   "||" ]
-                    ]
+-- TODO: Make this configurable
+margin :: Int
+margin = 2
