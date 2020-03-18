@@ -45,7 +45,7 @@ import           System.IO.UTF8 (readUTF8FilesT)
 import qualified Language.PureScript.CodeGen.Dart.CoreImp as Dart
 import qualified Language.PureScript.CodeGen.Dart.Printer as Dart
 
-import Language.PureScript.CodeGen.Dart.Common (toTargetFileName, toTargetImportName)
+import Language.PureScript.CodeGen.Dart.Ident (toTargetFileName, toTargetImportName, DartBaseFile(..), DartDir(..))
 import Language.PureScript.CodeGen.Dart.Command.Options (CommandLineOptions(..))
 import Language.PureScript.CodeGen.Dart.Version (versionString)
 
@@ -81,18 +81,18 @@ compile opts@CommandLineOptions{..} = runShake $ do
 
   let
 
-    makeOutputFileName = toTargetFileName "lib" cloPackageDir cloLibraryPrefix
+    makeOutputFileName = toTargetFileName Lib cloPackageDir cloLibraryPrefix
 
     --  Compiled file is required whenever a `CoreFn` module is generated.
     pursOutputFileName =
-      makeOutputFileName "index"
+      makeOutputFileName Index
 
     --  Foreign file is required when `CoreFn` module has a non-empty `moduleForeign` field.
     dartOutputFileName =
-      makeOutputFileName "foreign"
+      makeOutputFileName Foreign
 
-    dartBinaryFileName =
-      toTargetFileName "bin" cloPackageDir cloLibraryPrefix "exe"
+    dartBinaryFileName = -- FIXME: Should this be cloBinaryPrefix?
+      toTargetFileName Bin cloPackageDir cloLibraryPrefix Index
 
     --  Generate build targets
     pursOutputFileNames = pursOutputFileName "**"
@@ -239,12 +239,10 @@ compile opts@CommandLineOptions{..} = runShake $ do
 
     let
       modCoreImp =
-        Dart.moduleToDart opts cloPackageName cloLibraryPrefix modCoreFn
+        Dart.fromModule opts cloPackageName cloLibraryPrefix modCoreFn
       modOutput =
-        Dart.prettyPrintJS modCoreImp
-      modOutputDisableLints =
-        "// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types\n" <> modOutput
-    writeFileChanged outputPath (T.unpack modOutputDisableLints)
+        Dart.printModule modCoreImp
+    writeFileChanged outputPath (T.unpack modOutput)
 
   dartOutputFileNames %> \outputPath -> do
     InMemFileMap{..} <- liftIO $ IORef.readIORef ref
@@ -289,7 +287,7 @@ compile opts@CommandLineOptions{..} = runShake $ do
       binModuleName = assertValidModuleName outputPath $
         M.lookup outputPath filemapDartBinaries
       lib =
-        toTargetImportName cloPackageName cloLibraryPrefix "index" binModuleName
+        toTargetImportName cloPackageName cloLibraryPrefix Index binModuleName
     writeFileChanged outputPath $ unlines
       [ "import 'package:" <> lib <> "' as ps;"
       , "void main() => ps.main();"

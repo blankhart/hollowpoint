@@ -1,14 +1,12 @@
 {-# LANGUAGE ViewPatterns #-}
 
 module Language.PureScript.CodeGen.Dart.CoreImp
-  ( module AST
-  , module Common
-  , fromModule
+  ( fromModule
   ) where
 
 -- import Debug.Trace
 
-import Protolude (ordNub)
+import Protolude (for, ordNub)
 
 import Control.Monad (forM, replicateM, void)
 import Control.Monad.Except (MonadError, throwError)
@@ -26,28 +24,37 @@ import qualified Language.PureScript.Constants as C
 import Language.PureScript.CoreFn
 import Language.PureScript.Crash
 import Language.PureScript.Names
+import Language.PureScript.PSString (PSString, decodeString)
 import Language.PureScript.Traversals (sndM)
 
-import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer (optimize)
+-- import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer (optimize)
 import Language.PureScript.CodeGen.Dart.Command.Options as Dart
-import Language.PureScript.CodeGen.Dart.Common as Common
+import Language.PureScript.CodeGen.Dart.Ident
 import qualified Language.PureScript.CodeGen.Dart.CoreImp.AST as D
 import Language.PureScript.CodeGen.Dart.CoreImp.AST (DartExpr)
+import Language.PureScript.CodeGen.Dart.CoreImp.Directives
 
 import System.FilePath.Posix ((</>))
 
-fromModule :: Dart.CommandLineOptions -> String -> String -> Module Ann -> [AST]
+fromModule :: Dart.CommandLineOptions -> String -> String -> Module Ann -> [DartExpr]
 fromModule
   CommandLineOptions{..}
-  (DartIdent packageName)
-  (DartIdent libraryPrefix)
+  packageName
+  libraryPrefix
   (Module _ comments mn _ imports exports foreigns bindings)
   = evalSupply 0 $ do
-    (renamedBindings, namingContext) <- renameBindings imports
-    optDecls <- concat <$> fromDecls mn renamedBindings
+    let
+      foreignDecls =
+        if null foreigns
+          then []
+          else getForeignDirectives packageName libraryPrefix mn
+      importDecls =
+        getImportDirectives packageName libraryPrefix mn (snd <$> imports)
+    optDecls <- fromDecls mn True bindings
+    return $ concat [foreignDecls, importDecls, optDecls]
 
 -- | CoreFn to Dart IR
-fromDecls :: forall m . (Monad m, MonadSupply m) => ModuleName -> Boolean ->  [Bind Ann] -> m [DartExpr]
+fromDecls :: forall m . (Monad m, MonadSupply m) => ModuleName -> Bool ->  [Bind Ann] -> m [DartExpr]
 fromDecls mn cloStripComments bindings = do
   rawDecls <- mapM fromBinding bindings
   -- TODO: Optimize
@@ -59,7 +66,7 @@ fromDecls mn cloStripComments bindings = do
   fromBinding :: Bind Ann -> m [DartExpr]
   fromBinding = \case
     NonRec _ ident expr -> return <$> fromNonRec ident expr
-    Rec bindings -> forM bindings $ \(ident, expr) -> fromNonRec ident expr
+    Rec bindings -> forM bindings $ \((_, ident), expr) -> fromNonRec ident expr
 
   fromNonRec :: Ident -> Expr Ann -> m DartExpr
   -- Commented declaration
@@ -67,8 +74,8 @@ fromDecls mn cloStripComments bindings = do
     -- Comment
     e@(extractAnn -> (_, com, _, _)) | not (null com) ->
       case cloStripComments of
-        True -> fromNonRec a i uncommented
-        False -> D.Comment com <$> fromNonRec a i uncommented
+        True -> fromNonRec i uncommented
+        False -> D.Comment com <$> fromNonRec i uncommented
       where
         uncommented = modifyAnn removeComments e
 
@@ -76,7 +83,7 @@ fromDecls mn cloStripComments bindings = do
     e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) ->
       return $ D.ClassDecl (fromIdent i) (map fromIdent (unAbs e))
       where
-        methods :: Expr Ann -> [Ident]
+        unAbs :: Expr Ann -> [Ident]
         unAbs (Abs _ arg val) = arg : unAbs val
         unAbs _ = []
 
@@ -98,8 +105,8 @@ fromDecls mn cloStripComments bindings = do
         )
 
     e -> fromExpr e >>= \case
-      imp@(D.ClassDecl{}) -> decl
-      imp -> D.VarDecl (fromIdent i) expr
+      decl@(D.ClassDecl{}) -> return decl
+      expr -> return $ D.VarDecl (fromIdent i) expr
 
   fromExpr :: Expr Ann -> m DartExpr
   fromExpr = \case
@@ -107,16 +114,16 @@ fromDecls mn cloStripComments bindings = do
     Literal _ l ->
       fromLiteral l
 
-    Var (_, _, _, Just (IsConstructor _ [])) name) ->
+    Var (_, _, _, Just (IsConstructor _ [])) name ->
       return $ D.FnCall (fromVar name) []
 
-    Var (_, _, _, Just (IsConstructor _ _)) name) ->
+    Var (_, _, _, Just (IsConstructor _ _)) name ->
       return $ D.ObjectAccessor "create" (fromVar name)
 
     Abs (_, _, _, Just IsTypeClassConstructor) _ ctor ->
       internalError $ "Encountered a type class constructor not processed as a top-level binding:" <> show ctor
 
-    Abs _ (Ident "dict") (Accessor _ prop val@(Var _ (Qualified Nothing (Ident "dict"))))) -> do
+    Abs _ (Ident "dict") (Accessor _ prop val@(Var _ (Qualified Nothing (Ident "dict")))) -> do
       let field = fromMaybe (internalError $ "Encountered a typeclass method name that was not a decodable string:" <> show prop) (decodeString prop)
       body <- D.ObjectAccessor (DartIdent field) <$> fromExpr val
       return $ D.Lambda
@@ -124,7 +131,7 @@ fromDecls mn cloStripComments bindings = do
         (D.Block [D.Return (Just body)])
 
     -- Anonymous function declaration
-    Abs _ arg val = do
+    Abs _ arg val -> do
       ret <- fromExpr val
       return $
         D.Lambda
@@ -171,15 +178,15 @@ fromDecls mn cloStripComments bindings = do
         _ -> flip (foldl (\fn a -> D.FnCall fn [a])) args <$> fromExpr f
       where
         collectFnArgs :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
-        collectFnArgs (App _ val arg) args = unApp val (arg : args)
+        collectFnArgs (App _ val arg) args = collectFnArgs val (arg : args)
         collectFnArgs other args = (other, args)
 
-    Var (_, _, _, Just IsForeign) ref = case ref of
+    Var (_, _, _, Just IsForeign) ref -> case ref of
       qualified@(Qualified (Just mn') ident)
-        | mn' == mn -> return fromForeign ident
-        | otherwise -> return fromVar qualified
+        | mn' == mn -> return $ fromForeign ident
+        | otherwise -> return $ fromVar qualified
       unqualified ->
-        internalError $ "Encountered an unqualified reference to a foreign ident " <> T.unpack (showQualified showIdent ident)
+        internalError $ "Encountered an unqualified reference to a foreign ident " <> T.unpack (showQualified showIdent unqualified)
 
     Var _ ident -> return $ fromVar ident
 
@@ -201,9 +208,9 @@ fromDecls mn cloStripComments bindings = do
     -- If it were, there should be a class declaration with a static create
     -- method that has the semantics of the identity function.
     --  See https://github.com/purescript/purescript/blob/2963edd9e9c02b7284f1809ff09b62f4a8c1b128/src/Language/PureScript/CodeGen/JS.hs#L249
-    Constructor (_, _, _, ctorType) _ ctor fields ->
+    Constructor (_, _, _, ctorType) _ ctor fields
       | ctorType == Just IsNewtype ->
-          internalError $ "Encountered newtype constructor as record literal rather than as function declaration" <> ctor
+          internalError . T.unpack $ "Encountered newtype constructor as record literal rather than as function declaration" <> runProperName ctor
       | otherwise -> return $
           D.ClassDecl (fromProperName ctor) (fromIdent <$> fields)
 
@@ -236,8 +243,8 @@ fromDecls mn cloStripComments bindings = do
   --  NOTE: This generates unused variable bindings and may insert an exhaustivity check (throw) even in cases where it would be dead code.
   --  The implementation relies on an optimization pass and/or the Dart analyzer to remove these.
   fromCases :: [CaseAlternative Ann] -> [DartExpr] -> m DartExpr
-  fromCases _ binders vals = do
-    valNames <- replicateM (length vals) freshName
+  fromCases binders vals = do
+    valNames <- map fromAnyName <$> replicateM (length vals) freshName
     let assignments = zipWith D.VarDecl valNames vals
     imps <- forM binders $ \(CaseAlternative bs result) -> do
       ret <- fromGuards result
@@ -249,13 +256,13 @@ fromDecls mn cloStripComments bindings = do
       )
 
     where
-      go :: [Text] -> [DartExpr] -> [Binder Ann] -> m [DartExpr]
+      go :: [DartIdent] -> [DartExpr] -> [Binder Ann] -> m [DartExpr]
       go _ done [] = return done
       go (v:vs) done' (b:bs) = do
         done'' <- go vs done' bs
-        fromCaseBinder v done'' b
+        fromCaseBinder (D.VarRef v) done'' b
       go _ _ _ =
-        internalError "Encountered invalid arguments when converting case binders (" <> show binders <> ") and values (" <> show vals <> ")."
+        internalError $ "Encountered invalid arguments when converting case binders (" <> show binders <> ") and values (" <> show vals <> ")."
 
       fromGuards :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [DartExpr]
       fromGuards = \case
@@ -265,40 +272,39 @@ fromDecls mn cloStripComments bindings = do
           return $ D.IfThen cond' (D.Block [D.Return (Just val')])
         Right v -> return . D.Return . Just <$> fromExpr v
 
-  fromCaseBinder :: DartIdent -> [DartExpr] -> Binder Ann -> m [DartExpr]
-  fromCaseBinder varIdent done = \case
+  fromCaseBinder :: DartExpr -> [DartExpr] -> Binder Ann -> m [DartExpr]
+  fromCaseBinder varRef done = \case
     NullBinder{} -> return done
     LiteralBinder _ lit ->
       fromLiteralBinder varRef done lit
     VarBinder _ i ->
       return (D.VarDecl (fromIdent i) varRef : done)
-    ConstructorBinder c@(_, _, _, meta) _ ctor bs -> case (meta, bs) of
+    ConstructorBinder (_, _, _, meta) _ ctor bs -> case (meta, bs) of
       (Just IsNewtype, [b]) -> fromCaseBinder varRef done b
       (Just (IsConstructor ctorType fs), _) -> do
-        imp <- go (zip fields bs) done
+        imp <- go (zip fs bs) done
         return $ case ctorType of
           ProductType -> imp
           SumType ->
             [ D.IfThen
-              (D.Binary D.Is VarRef (fromVar (Ident . runProperName) c))
+              (D.Binary D.Is varRef (fromQualified fromProperName ctor))
               (D.Block imp)
             ]
         where
           go :: [(Ident, Binder Ann)] -> [DartExpr] -> m [DartExpr]
           go [] done' = return done'
           go ((field, binder) : remain) done' = do
-            argVar <- freshName
+            argVar <- fromAnyName <$> freshName
             done'' <- go remain done'
-            imp <- fromCaseBinder argVar done'' binder
+            imp <- fromCaseBinder (D.VarRef argVar) done'' binder
             return (D.VarDecl argVar (D.ObjectAccessor (fromIdent field) varRef) : imp)
-      _ -> internalError $ "Encountered invalid constructor binder:" <> show c
+      _ -> internalError $ "Encountered invalid constructor binder:" <> show ctor
     NamedBinder _ ident binder -> do
-      imp <- fromCaseBinder varIdent done binder
+      imp <- fromCaseBinder varRef done binder
       return (D.VarDecl (fromIdent ident) varRef : imp)
-    where varRef = D.VarRef varIdent
 
-  fromLiteralBinder :: DartIdent -> [DartExpr] -> Literal (Binder Ann) -> m [DartExpr]
-  fromLiteralBinder varIdent done = \case
+  fromLiteralBinder :: DartExpr -> [DartExpr] -> Literal (Binder Ann) -> m [DartExpr]
+  fromLiteralBinder varRef done = \case
     NumericLiteral (Left i) -> return . pure $
       D.IfEqual varRef (D.IntegerLiteral i) (D.Block done)
     NumericLiteral (Right n) -> return . pure $
@@ -316,9 +322,9 @@ fromDecls mn cloStripComments bindings = do
         go :: [DartExpr] -> [(PSString, Binder Ann)] -> m [DartExpr]
         go done' [] = return done'
         go done' ((prop, binder):bs') = do
-          propVar <- freshName
+          propVar <- fromAnyName <$> freshName
           done'' <- go done' bs'
-          imp <- fromCaseBinder propVar done'' binder
+          imp <- fromCaseBinder (D.VarRef propVar) done'' binder
           return (D.VarDecl propVar (D.RecordAccessor prop varRef) : imp)
     ArrayLiteral bs -> do
       imp <- go done 0 bs
@@ -326,13 +332,12 @@ fromDecls mn cloStripComments bindings = do
         D.IfEqual
           (D.ObjectAccessor "length" varRef)
           (D.IntegerLiteral (fromIntegral $ length bs))
-          imp
+          (D.Block imp) -- FIXME
       where
         go :: [DartExpr] -> Integer -> [Binder Ann] -> m [DartExpr]
         go done' _ [] = return done'
         go done' index (binder:bs') = do
-          elVar <- freshName
+          elVar <- fromAnyName <$> freshName
           done'' <- go done' (index + 1) bs'
-          imp <- fromCaseBinder elVar done'' binder
+          imp <- fromCaseBinder (D.VarRef elVar) done'' binder
           return $ D.VarDecl elVar (D.ArrayAccessor index varRef) : imp
-  where varRef = D.VarRef varIdent

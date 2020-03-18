@@ -17,7 +17,7 @@ import Data.String (IsString(..))
 
 -- | Dart identifiers
 newtype DartIdent = DartIdent { runDartIdent :: Text }
-  deriving (Show, Eq, IsString)
+  deriving (Show, Eq, IsString, Monoid, Semigroup)
 
 -- | Directory recognized by Dart pub tool
 data DartDir = Lib | Bin | Web
@@ -39,11 +39,17 @@ instance Show DartBaseFile where
 
 -- TODO: Clean a la  https://github.com/csicar/pskt/blob/408f66f55231882f981c03baa69e26921f7ea806/src/CodeGen/KtCore.hs#L121
 
+-- Data.BigThing -> data/big_thing
 toDartFilePath :: FilePath -> FilePath
 toDartFilePath =
     foldl' (</>) ""
   . fmap snakeCase
   . splitOn "."
+
+-- Data.BigThing -> _$Data_BigThing
+fromModuleName :: ModuleName -> DartIdent
+fromModuleName (ModuleName pns) = DartIdent $
+  "_$" <> T.intercalate "_" (runProperName `map` pns)
 
 toTargetFileName :: DartDir -> FilePath -> FilePath -> DartBaseFile -> String -> FilePath
 toTargetFileName dir packageDir libraryPrefix baseName moduleName =
@@ -62,11 +68,6 @@ toTargetImportName packageName libraryPrefix baseName moduleName =
   </> show baseName
   <.> "dart"
 
-fromModuleName :: ModuleName -> DartIdent
-fromModuleName (ModuleName pns) = DartIdent $
-  let name = T.intercalate "_" (runProperName `map` pns)
-  in if nameIsBuiltIn name then "$$" <> name else name
-
 -- | Convert an 'Ident' into a valid Dart identifier:
 --  * Alphanumeric characters are kept unmodified.
 --  * Reserved identifiers are prefixed with '$$'.
@@ -78,9 +79,9 @@ fromIdent :: Ident -> DartIdent
 fromIdent = \case
   Ident "undefined" -> "null"
   Ident "$__unused" -> "_"
-  Ident name ->
-  | Just n <- T.stripPrefix "_" name = "$_" <> fromAnyName n
-  | otherwise = fromAnyName name
+  Ident name
+    | Just n <- T.stripPrefix "_" name -> "$_" <> fromAnyName n
+    | otherwise -> fromAnyName name
   GenIdent _ _ -> internalError "GenIdent in identToJs"
   UnusedIdent -> "_"
 
@@ -95,10 +96,13 @@ fromProperName = fromAnyName . runProperName
 -- with a digit. Prefer 'identToJs' or 'properToJs' where possible.
 fromAnyName :: Text -> DartIdent
 fromAnyName name
-  | isReserved name || isBuiltIn name = "$$" <> name
+  | isReserved name || isBuiltIn name =
+      DartIdent ("$$" <> name)
    -- should be a null set for proper names, and handled elsewhere for value identifiers, but make all identifiers public by default:
-  | Just underscored <- T.stripPrefix "_" name = "$_" <> fromAnyName underscored
-  | otherwise = T.concatMap identCharToText name
+  | Just underscored <- T.stripPrefix "_" name =
+      DartIdent "$_" <> fromAnyName underscored
+  | otherwise =
+      DartIdent (T.concatMap identCharToText name)
 
 -- There may be circumstances in which an arbitrary string would be used as
 -- an object accessor, and so would need to be converted.  Think further.
@@ -112,8 +116,8 @@ identCharToText c = T.singleton c
 
 -- | Checks whether an identifier name is reserved in JavaScript.
 isReserved :: Text -> Bool
-isReserved = `elem` []
+isReserved name = elem name []
 
 -- | Checks whether a name matches a built-in value in JavaScript.
 isBuiltIn :: Text -> Bool
-isBuiltIn name = `elem` []
+isBuiltIn name = elem name []

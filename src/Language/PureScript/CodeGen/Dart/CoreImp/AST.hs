@@ -14,6 +14,9 @@ import Data.Text (Text)
 
 import Language.PureScript.Comments
 import Language.PureScript.Traversals
+import Language.PureScript.PSString (PSString)
+
+import Language.PureScript.CodeGen.Dart.Ident
 
 import Text.Show.Deriving (deriveShow)
 
@@ -30,7 +33,7 @@ data DartExpr
   -- ^ A boolean literal
   | ArrayLiteral [DartExpr]
   -- ^ An array literal
-  | RecordLiteral [(DartIdent, DartExpr)]
+  | RecordLiteral [(PSString, DartExpr)]
   -- ^ A record literal
   | ClassDecl DartIdent [DartIdent]
   -- ^ A class declaration (name, fields)
@@ -67,7 +70,7 @@ data DartExpr
   deriving (Show, Eq)
 
 data Directive
-  = Import Text Text -- ^ import "package:purescript/$1/index.dart" as $2
+  = Import Text DartIdent -- ^ import "package:purescript/$1/index.dart" as $2
   | Export Text -- ^ export $1 show $2
   deriving (Show, Eq)
 
@@ -78,6 +81,7 @@ data Accessor
   -- ^ A record accessor expression (map key)
   | ObjectMethod
   -- ^ An object accessor expression (class instance method)
+  deriving (Show, Eq)
 
 -- | Built-in unary operators
 data UnaryOperator
@@ -112,13 +116,13 @@ data BinaryOperator
 class HasOperatorPriority a where
   priority :: a -> OperatorPriority
 
-class HasOperatorPriority UnaryOperator where
+instance HasOperatorPriority UnaryOperator where
   priority = \case
     Negate -> NumericSumOp
     Not -> LogicalSumOp
     BitwiseNot -> BitwiseSumOp
 
-class HasOperatorPriority BinaryOperator where
+instance HasOperatorPriority BinaryOperator where
   priority = \case
     Multiply -> NumericProductOp
     Divide -> NumericProductOp
@@ -158,7 +162,7 @@ pattern IntegerLiteral i = NumericLiteral (Left i)
 pattern DoubleLiteral :: Double -> DartExpr
 pattern DoubleLiteral n = NumericLiteral (Right n)
 
-pattern Lambda :: [Text] -> DartExpr -> DartExpr
+pattern Lambda :: [DartIdent] -> DartExpr -> DartExpr
 pattern Lambda params body = FnDecl Nothing params body
 
 --  TODO: Possibly wrap this in a block.
@@ -168,8 +172,8 @@ pattern Thunk body = Lambda [] body
 pattern ArrayAccessor :: Integer -> DartExpr -> DartExpr
 pattern ArrayAccessor ix var = Accessor ArrayIndex (IntegerLiteral ix) var
 
-pattern RecordAccessor :: Text -> DartExpr -> DartExpr
-pattern RecordAccessor txt var = Accessor RecordField (StringLiteral txt) var
+pattern RecordAccessor :: PSString -> DartExpr -> DartExpr
+pattern RecordAccessor pss var = Accessor RecordField (StringLiteral pss) var
 
 pattern ObjectAccessor :: DartIdent -> DartExpr -> DartExpr
 pattern ObjectAccessor i var = Accessor ObjectMethod (VarRef i) var
@@ -177,17 +181,14 @@ pattern ObjectAccessor i var = Accessor ObjectMethod (VarRef i) var
 pattern MethodCall :: DartExpr -> DartIdent -> [DartExpr] -> DartExpr
 pattern MethodCall obj method args = FnCall (ObjectAccessor method obj) args
 
-pattern IfThen :: DartExpr -> DartExpr -> DartExpr -> DartExpr
+pattern IfThen :: DartExpr -> DartExpr -> DartExpr
 pattern IfThen cond thens = If cond thens Nothing
 
 pattern IfEqual :: DartExpr -> DartExpr -> DartExpr -> DartExpr
 pattern IfEqual a b thens = If (Binary EqualTo a b) thens Nothing
 
-pattern IfThenElse :: DartExpr -> DartExpr -> DartExpr -> DartExpr -> DartExpr
+pattern IfThenElse :: DartExpr -> DartExpr -> DartExpr -> DartExpr
 pattern IfThenElse cond thens elses = If cond thens (Just elses)
 
-pattern IIFE :: DartExpr -> DartExpr
+pattern IIFE :: [DartExpr] -> DartExpr
 pattern IIFE body = FnCall (Lambda [] (Block body)) []
-
-makeBaseFunctor ''ImpF
-deriveShow ''ImpF

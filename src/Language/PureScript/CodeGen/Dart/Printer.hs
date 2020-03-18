@@ -6,19 +6,26 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc
+import Data.Text.Prettyprint.Doc.Render.Text
 import Data.Word (Word16)
 
 import Language.PureScript.Comments
 import Language.PureScript.Crash
-import Language.PureScript.Pretty.Common
-import Language.PureScript.PSString (PSString, decodeString)
-import Language.PureScript.CodeGen.Dart.Common
+import qualified Language.PureScript.Pretty.Common as P
+import Language.PureScript.PSString (PSString, decodeString, toUTF16CodeUnits)
+
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
+import Language.PureScript.CodeGen.Dart.Ident
 
 import Numeric (showHex)
 
+-- TODO: Provide renderings to both Text and IO.
+-- TODO: Be lazy with Text and renderLazy.
+-- See https://hackage.haskell.org/package/prettyprinter-1.6.1/docs/Data-Text-Prettyprint-Doc-Render-Text.html
 printModule :: [DartExpr] -> Text
-printModule decls = foldMap (<>) (pretty <$> decls)
+printModule decls =
+  renderStrict $ layoutPretty defaultLayoutOptions $ vsep $
+    "// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types" : (pretty <$> decls)
 
 instance Pretty DartExpr where
   pretty e = case e of
@@ -33,11 +40,11 @@ instance Pretty DartExpr where
       statement = printExpr e <> ";"
       declaration = printExpr e
 
-printExpr :: DartExpr -> Doc ()
+printExpr :: DartExpr -> Doc ann
 printExpr = \case
 
   Directive (Import lib name) ->
-    "import" <+> squotes (pretty lib) <+> "as" <+> pretty qual
+    "import" <+> squotes (pretty lib) <+> "as" <+> pretty name
 
   Directive (Export lib) ->
     "export" <+> squotes (pretty lib)
@@ -58,7 +65,7 @@ printExpr = \case
 
   ArrayLiteral es ->
     -- TODO: Break across lines in appropriate cases
-    brackets (punctuate "," (pretty <$> es))
+    brackets $ hsep $ punctuate "," (pretty <$> es)
 
   RecordLiteral kvs -> case kvs of
     [] -> "{}"
@@ -67,26 +74,28 @@ printExpr = \case
       assign (key, value) = squotes (pretty key) <+> ":" <+> pretty value
 
   ClassDecl name fields ->
-    "class" <+> pretty c <+> blockedDecls bodyDecls
+    "class" <+> pretty name <+> blockedDocs bodyDecls
     where
       bodyDecls =
-        concat [fieldDecls, ctorDecl, createDecl]
+        fieldDecls ++ [ctorDecl, createDecl]
+      fieldOuts =
+        fmap pretty fields
       fieldDecls =
         fmap (\f -> "final dynamic" <+> pretty f) fields
       ctorDecl =
-        "const" <+> c <> uncurriedArgs (fmap ("this." <>) fields)
+        "const" <+> pretty name <> uncurriedArgs (fmap ("this." <>) fields)
       createDecl =
         "static dynamic get create =>" <+> curriedArgs fields <+> ctorCall
       ctorCall =
-        c <> uncurriedArgs fs <> ";"
+        pretty name <> uncurriedArgs fields <> ";"
 
   -- TODO: Integrate with AST pass that converts single-expression functions
   -- into lambdas.
   FnDecl fn args body ->
-    pretty fn <> uncurriedArgs args <+> (const "=>" <$> arrow) <+> pretty body
+    pretty fn <> uncurriedArgs args <+> pretty arrow <+> pretty body
     where
       arrow = case body of
-        FnDecl{} -> Just ()
+        FnDecl{} -> Just ("=>" :: Text)
         _ -> Nothing
 
   FnCall fn args ->
@@ -144,46 +153,48 @@ printExpr = \case
     "@" <> pretty ann <> line <> pretty e
 
 instance Pretty UnaryOperator where
-  pretty op = pretty $ case op of
-    Negate -> "-"
-    Not -> "!"
-    BitwiseNot -> "~"
+  pretty op = pretty (t :: Text) where
+    t = case op of
+      Negate -> "-"
+      Not -> "!"
+      BitwiseNot -> "~"
 
 instance Pretty BinaryOperator where
-  pretty op = pretty $ case op of
-    -- Precedence class
-    Multiply -> "*"
-    Divide -> "/"
-    Modulus -> "%"
-    -- Precedence class
-    Add -> "+"
-    Subtract -> "-"
-    -- Precedence class
-    ShiftLeft -> "<<"
-    ShiftRight -> ">>"
-    -- Precedence class
-    BitwiseAnd -> "&"
-    -- Precedence class
-    BitwiseXor -> "^"
-    -- Precedence class
-    BitwiseOr -> "|"
-    -- Precedence class
-    EqualTo -> "=="
-    NotEqualTo -> "!="
-    LessThan -> "<"
-    LessThanOrEqualTo -> "<="
-    GreaterThan -> ">"
-    GreaterThanOrEqualTo -> ">="
-    Is -> "is"
-    -- Precedence class
-    And -> "&&"
-    Or -> "||"
+  pretty op = pretty (t :: Text) where
+    t = case op of
+      -- Precedence class
+      Multiply -> "*"
+      Divide -> "/"
+      Modulus -> "%"
+      -- Precedence class
+      Add -> "+"
+      Subtract -> "-"
+      -- Precedence class
+      ShiftLeft -> "<<"
+      ShiftRight -> ">>"
+      -- Precedence class
+      BitwiseAnd -> "&"
+      -- Precedence class
+      BitwiseXor -> "^"
+      -- Precedence class
+      BitwiseOr -> "|"
+      -- Precedence class
+      EqualTo -> "=="
+      NotEqualTo -> "!="
+      LessThan -> "<"
+      LessThanOrEqualTo -> "<="
+      GreaterThan -> ">"
+      GreaterThanOrEqualTo -> ">="
+      Is -> "is"
+      -- Precedence class
+      And -> "&&"
+      Or -> "||"
 
 -- | Pretty-print a PSString using Dart escape sequences.
 -- Intended for use in compiled Dart output.
 -- FIXME: Adapt to Dart strings
 instance Pretty PSString where
-  pretty s = "\'" <> foldMap encodeChar (toUTF16CodeUnits s) <> "\'"
+  pretty s = pretty ("\'" <> foldMap encodeChar (toUTF16CodeUnits s) <> "\'")
     where
       encodeChar :: Word16 -> Text
       encodeChar c | c > 0xFF = "\\u" <> showHex' 4 c
@@ -196,7 +207,7 @@ instance Pretty PSString where
       encodeChar c | toChar c == '\r' = "\\r"
       encodeChar c | toChar c == '"'  = "\\\""
       encodeChar c | toChar c == '\\' = "\\\\"
-      encodeChar c = Text.singleton $ toChar c
+      encodeChar c = T.singleton $ toChar c
 
       showHex' :: Enum a => Int -> a -> Text
       showHex' width c =
@@ -211,26 +222,32 @@ instance Pretty Comment where
     LineComment com -> "//" <+> pretty com
     BlockComment com -> "/**" <> line <> vsep clines <> line <> "*/"
       where
-        clines = fmap (" * " <>) T.unlines com
+        clines = fmap (pretty . (" * " <>)) (T.lines com)
     -- FIXME: Ensure block comments does not include "*/"
 
 instance Pretty DartIdent where
   pretty = pretty . runDartIdent
 
-uncurriedArgs :: [Doc ()] -> Doc ()
-uncurriedArgs = parens . hsep . punctuate ","
+uncurriedArgs :: Pretty a => [a] -> Doc ann
+uncurriedArgs =
+  parens . hsep . punctuate "," . fmap pretty
 
-curriedArgs :: [Doc ()] -> Doc ()
-curriedArgs = concatWith (surround " => ") . fmap parens
+curriedArgs :: Pretty a => [a] -> Doc ann
+curriedArgs =
+  concatWith (surround " => ") . fmap (parens . pretty)
 
-blockedDecls :: [Doc ()] -> Doc ()
-blockedDecls decls = braces $ line <> indent margin (align (vsep decls)) <> line
+blockedDocs :: [Doc ann] -> Doc ann
+blockedDocs decls = braces $ line <> indent margin (align (vsep decls)) <> line
 
-smartParens :: HasOperatorPriority o => o -> DartExpr -> Doc ()
+blockedDecls :: Pretty a => [a] -> Doc ann
+blockedDecls decls =
+  blockedDocs (pretty <$> decls)
+
+smartParens :: HasOperatorPriority o => o -> DartExpr -> Doc ann
 smartParens op expr = case expr of
-  Unary o | priority o <= priority op -> parens expr
-  Binary o _ _ | priority o <= priority op -> parens expr
-  _ -> expr
+  Unary o _ | priority o <= priority op -> parens (pretty expr)
+  Binary o _ _ | priority o <= priority op -> parens (pretty expr)
+  _ -> pretty expr
 
 -- TODO: Make this configurable
 margin :: Int
