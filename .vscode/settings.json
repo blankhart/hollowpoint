@@ -13,7 +13,7 @@
     "example": true,
     "app": true,
     "foreigns": true,
-    "x": true,
+    "x": false,
     "**/.hollowpoint": true,
     "LICENSE": true,
     "Setup.hs": true,

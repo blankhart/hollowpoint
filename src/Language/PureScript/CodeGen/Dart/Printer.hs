@@ -25,7 +25,8 @@ import Numeric (showHex)
 printModule :: [DartExpr] -> Text
 printModule decls =
   renderStrict $ layoutPretty defaultLayoutOptions $ vsep $
-    "// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types" : (pretty <$> decls)
+    "// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types, top_level_function_literal_block"
+    : (pretty <$> decls)
 
 instance Pretty DartExpr where
   pretty e = case e of
@@ -33,12 +34,16 @@ instance Pretty DartExpr where
       --  TODO: Fat arrows for literals, operators etc. not nested inside return blocks also would be statements
       FnDecl{} -> statement
       _ -> declaration
-    ClassDecl{} -> declaration
-    While{} -> declaration
-    _ -> statement
+    VarDecl{} -> statement
+    Reassign{} -> statement
+    Return{} -> statement
+    Throw{} -> statement
+    Directive{} -> statement
+    _ -> expression
     where
       statement = printExpr e <> ";"
       declaration = printExpr e
+      expression = printExpr e
 
 printExpr :: DartExpr -> Doc ann
 printExpr = \case
@@ -71,7 +76,7 @@ printExpr = \case
     [] -> "{}"
     ps -> braces $ align $ vsep $ punctuate comma $ assign <$> kvs
     where
-      assign (key, value) = squotes (pretty key) <+> ":" <+> pretty value
+      assign (key, value) = pretty key <+> ":" <+> pretty value
 
   ClassDecl name fields ->
     "class" <+> pretty name <+> blockedDocs bodyDecls
@@ -81,13 +86,14 @@ printExpr = \case
       fieldOuts =
         fmap pretty fields
       fieldDecls =
-        fmap (\f -> "final dynamic" <+> pretty f) fields
+        fmap (\f -> "final dynamic" <+> pretty f <> ";") fields
       ctorDecl =
-        "const" <+> pretty name <> uncurriedArgs (fmap ("this." <>) fields)
+        "const" <+> pretty name <> uncurriedArgs (fmap ("this." <>) fields) <> ";"
       createDecl =
-        "static dynamic get create =>" <+> curriedArgs fields <+> ctorCall
-      ctorCall =
-        pretty name <> uncurriedArgs fields <> ";"
+        let
+          args = if null fields then "" else curriedArgs fields <+> "=>"
+        in
+          "static dynamic get" <+> "create" <+> "=>" <+> args <+> pretty name <> uncurriedArgs fields <> ";"
 
   -- TODO: Integrate with AST pass that converts single-expression functions
   -- into lambdas.

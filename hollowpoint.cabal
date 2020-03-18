@@ -22,6 +22,7 @@ library purescript-dart
     Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Unused
     Language.PureScript.CodeGen.Dart.Command.Compile
     Language.PureScript.CodeGen.Dart.Command.Options
+    Language.PureScript.CodeGen.Dart.Ident
     Language.PureScript.CodeGen.Dart.Printer
     Language.PureScript.CodeGen.Dart.Version
   other-modules:

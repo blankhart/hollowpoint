@@ -125,7 +125,7 @@ fromDecls mn cloStripComments bindings = do
 
     Abs _ (Ident "dict") (Accessor _ prop val@(Var _ (Qualified Nothing (Ident "dict")))) -> do
       let field = fromMaybe (internalError $ "Encountered a typeclass method name that was not a decodable string:" <> show prop) (decodeString prop)
-      body <- D.ObjectAccessor (DartIdent field) <$> fromExpr val
+      body <- D.ObjectAccessor (fromAnyName field) <$> fromExpr val
       return $ D.Lambda
         ["dict"]
         (D.Block [D.Return (Just body)])
