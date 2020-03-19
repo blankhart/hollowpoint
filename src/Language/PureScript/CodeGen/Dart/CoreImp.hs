@@ -33,6 +33,7 @@ import Language.PureScript.CodeGen.Dart.Ident
 import qualified Language.PureScript.CodeGen.Dart.CoreImp.AST as D
 import Language.PureScript.CodeGen.Dart.CoreImp.AST (DartExpr)
 import Language.PureScript.CodeGen.Dart.CoreImp.Directives
+import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer
 
 import System.FilePath.Posix ((</>))
 
@@ -57,8 +58,7 @@ fromModule
 fromDecls :: forall m . (Monad m, MonadSupply m) => ModuleName -> Bool ->  [Bind Ann] -> m [DartExpr]
 fromDecls mn cloStripComments bindings = do
   rawDecls <- mapM fromBinding bindings
-  -- TODO: Optimize
-  let optDecls = rawDecls
+  optDecls <- traverse (traverse optimize) rawDecls
   return $ concat optDecls
 
   where

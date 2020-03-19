@@ -26,137 +26,138 @@ printModule :: [DartExpr] -> Text
 printModule decls =
   renderStrict $ layoutPretty defaultLayoutOptions $ vsep $
     "// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types, top_level_function_literal_block"
-    : (pretty <$> decls)
+    : (semicolonize <$> decls)
+
+semicolonize :: DartExpr -> Doc ann
+semicolonize e = case e of
+  FnDecl _ _ inner -> case inner of
+    --  TODO: Fat arrows for literals, operators etc. not nested inside return blocks also would be statements
+    FnDecl{} -> statement
+    _ -> declaration
+  FnCall{} -> statement
+  VarDecl{} -> statement
+  VarAssign{} -> statement
+  Return{} -> statement
+  Throw{} -> statement
+  Directive{} -> statement
+  _ -> expression
+  where
+    statement = pretty e <> ";"
+    declaration = pretty e
+    expression = pretty e
 
 instance Pretty DartExpr where
-  pretty e = case e of
-    FnDecl _ _ inner -> case inner of
-      --  TODO: Fat arrows for literals, operators etc. not nested inside return blocks also would be statements
-      FnDecl{} -> statement
-      _ -> declaration
-    VarDecl{} -> statement
-    Reassign{} -> statement
-    Return{} -> statement
-    Throw{} -> statement
-    Directive{} -> statement
-    _ -> expression
-    where
-      statement = printExpr e <> ";"
-      declaration = printExpr e
-      expression = printExpr e
+  pretty = \case
 
-printExpr :: DartExpr -> Doc ann
-printExpr = \case
+    Directive (Import lib name) ->
+      "import" <+> squotes (pretty lib) <+> "as" <+> pretty name
 
-  Directive (Import lib name) ->
-    "import" <+> squotes (pretty lib) <+> "as" <+> pretty name
+    Directive (Export lib) ->
+      "export" <+> squotes (pretty lib)
 
-  Directive (Export lib) ->
-    "export" <+> squotes (pretty lib)
+    IntegerLiteral i ->
+      pretty i
 
-  IntegerLiteral i ->
-    pretty i
+    -- TODO: Review whether this always produces correct Dart
+    DoubleLiteral d ->
+      pretty d
 
-  -- TODO: Review whether this always produces correct Dart
-  DoubleLiteral d ->
-    pretty d
+    StringLiteral ps ->
+      pretty ps
 
-  StringLiteral ps ->
-    pretty ps
+    BooleanLiteral b -> case b of
+      True -> "true"
+      False -> "false"
 
-  BooleanLiteral b -> case b of
-    True -> "true"
-    False -> "false"
+    ArrayLiteral es ->
+      -- TODO: Break across lines in appropriate cases
+      brackets $ hsep $ punctuate "," (pretty <$> es)
 
-  ArrayLiteral es ->
-    -- TODO: Break across lines in appropriate cases
-    brackets $ hsep $ punctuate "," (pretty <$> es)
+    RecordLiteral kvs -> case kvs of
+      [] -> "{}"
+      ps -> braces $ align $ vsep $ punctuate comma $ assign <$> kvs
+      where
+        assign (key, value) = pretty key <+> ":" <+> pretty value
 
-  RecordLiteral kvs -> case kvs of
-    [] -> "{}"
-    ps -> braces $ align $ vsep $ punctuate comma $ assign <$> kvs
-    where
-      assign (key, value) = pretty key <+> ":" <+> pretty value
+    ClassDecl name fields ->
+      "class" <+> pretty name <+> blockedDecls bodyDecls
+      where
+        bodyDecls =
+          fieldDecls ++ [ctorDecl, createDecl]
+        fieldOuts =
+          fmap pretty fields
+        fieldDecls =
+          fmap (\f -> "final dynamic" <+> pretty f <> ";") fields
+        ctorDecl =
+          "const" <+> pretty name <> uncurriedArgs (fmap ("this." <>) fields) <> ";"
+        createDecl =
+          let
+            args = if null fields then "" else curriedArgs fields <+> "=>"
+          in
+            "static dynamic get" <+> "create" <+> "=>" <+> args <+> pretty name <> uncurriedArgs fields <> ";"
 
-  ClassDecl name fields ->
-    "class" <+> pretty name <+> blockedDocs bodyDecls
-    where
-      bodyDecls =
-        fieldDecls ++ [ctorDecl, createDecl]
-      fieldOuts =
-        fmap pretty fields
-      fieldDecls =
-        fmap (\f -> "final dynamic" <+> pretty f <> ";") fields
-      ctorDecl =
-        "const" <+> pretty name <> uncurriedArgs (fmap ("this." <>) fields) <> ";"
-      createDecl =
-        let
-          args = if null fields then "" else curriedArgs fields <+> "=>"
-        in
-          "static dynamic get" <+> "create" <+> "=>" <+> args <+> pretty name <> uncurriedArgs fields <> ";"
+    -- TODO: Integrate with AST pass that converts single-expression functions
+    -- into lambdas.
+    FnDecl fn args body ->
+      pretty fn <> uncurriedArgs args <+> pretty arrow <+> pretty body
+      where
+        arrow = case body of
+          FnDecl{} -> Just ("=>" :: Text)
+          _ -> Nothing
 
-  -- TODO: Integrate with AST pass that converts single-expression functions
-  -- into lambdas.
-  FnDecl fn args body ->
-    pretty fn <> uncurriedArgs args <+> pretty arrow <+> pretty body
-    where
-      arrow = case body of
-        FnDecl{} -> Just ("=>" :: Text)
-        _ -> Nothing
+    FnCall fn args ->
+      pretty fn <> uncurriedArgs args
 
-  FnCall fn args ->
-    pretty fn <> uncurriedArgs args
+    Unary op e ->
+      pretty op <> smartParens op e
 
-  Unary op e ->
-    pretty op <> smartParens op e
+    Binary op lhs rhs ->
+      smartParens op lhs <+> pretty op <+> smartParens op rhs
 
-  Binary op lhs rhs ->
-    smartParens op lhs <+> pretty op <+> smartParens op rhs
+    Block decls ->
+      blockedDecls (semicolonize <$> decls)
 
-  Block es ->
-    blockedDecls es
+    VarDecl name expr ->
+      -- FIXME: This will fail for a mutable TCO variable.
+      -- TODO: If expr is a literal, this can be declared const
+      -- unless it is part of the TCO optimization and needs the ability
+      -- to be reassigneds
+      "final" <+> pretty name <+> "=" <+> pretty expr
 
-  VarDecl name expr ->
-    -- FIXME: This will fail for a mutable TCO variable.
-    -- TODO: If expr is a literal, this can be declared const
-    -- unless it is part of the TCO optimization and needs the ability
-    -- to be reassigneds
-    "final" <+> pretty name <+> "=" <+> pretty expr
+    VarRef name ->
+      pretty name
 
-  VarRef name ->
-    pretty name
+    Accessor ArrayIndex index name ->
+      pretty name <> brackets (pretty index)
 
-  Accessor ArrayIndex index name ->
-    pretty name <> brackets (pretty index)
+    Accessor RecordField field name ->
+      pretty name <> brackets (pretty field)
 
-  Accessor RecordField field name ->
-    pretty name <> brackets (pretty field)
+    Accessor ObjectMethod method name ->
+      pretty name <> "." <> pretty method
 
-  Accessor ObjectMethod method name ->
-    pretty name <> "." <> pretty method
+    VarAssign name expr ->
+      pretty name <+> "=" <+> pretty expr
 
-  Reassign name expr ->
-    pretty name <+> "=" <+> pretty expr
+    While cond body ->
+      "while" <+> parens (pretty cond) <+> pretty body
 
-  While cond body ->
-    "while" <+> parens (pretty cond) <+> pretty body
+    If cond thens elses ->
+      "if" <+> parens (pretty cond)
+        <> pretty thens
+        <> maybe "" (\e -> "else" <+> pretty e) elses
 
-  If cond thens elses ->
-    "if" <+> parens (pretty cond)
-      <> pretty thens
-      <> maybe "" (\e -> "else" <+> pretty e) elses
+    Return e ->
+      "return" <+> pretty e
 
-  Return e ->
-    "return" <+> pretty e
+    Throw e ->
+      "throw" <+> pretty e
 
-  Throw e ->
-    "throw" <+> pretty e
+    Comment coms decl ->
+      vsep (pretty <$> coms) <> line <> pretty decl
 
-  Comment coms decl ->
-    vsep (pretty <$> coms) <> line <> pretty decl
-
-  Annotation ann e ->
-    "@" <> pretty ann <> line <> pretty e
+    Annotation ann e ->
+      "@" <> pretty ann <> line <> pretty e
 
 instance Pretty UnaryOperator where
   pretty op = pretty (t :: Text) where
@@ -242,12 +243,9 @@ curriedArgs :: Pretty a => [a] -> Doc ann
 curriedArgs =
   concatWith (surround " => ") . fmap (parens . pretty)
 
-blockedDocs :: [Doc ann] -> Doc ann
-blockedDocs decls = braces $ line <> indent margin (align (vsep decls)) <> line
-
-blockedDecls :: Pretty a => [a] -> Doc ann
+blockedDecls :: [Doc ann] -> Doc ann
 blockedDecls decls =
-  blockedDocs (pretty <$> decls)
+  braces $ line <> indent margin (align (vsep decls)) <> line
 
 smartParens :: HasOperatorPriority o => o -> DartExpr -> Doc ann
 smartParens op expr = case expr of

@@ -1,4 +1,8 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | Data types for the imperative core Dart AST
 module Language.PureScript.CodeGen.Dart.CoreImp.AST where
@@ -8,6 +12,7 @@ import Prelude.Compat
 import Control.Monad ((>=>))
 import Control.Monad.Identity (Identity(..), runIdentity)
 
+import Data.Functor.Contravariant (contramap)
 import Data.Functor.Foldable
 import Data.Functor.Foldable.TH
 import Data.Text (Text)
@@ -53,7 +58,7 @@ data DartExpr
   -- ^ Variable reference
   | Accessor Accessor DartExpr DartExpr
   -- ^ A collection variable accessor (collection var, field identifier)
-  | Reassign DartExpr DartExpr
+  | VarAssign DartExpr DartExpr
   -- ^ A variable reassignment (not initialization)
   | While DartExpr DartExpr
   -- ^ While loop
@@ -192,3 +197,18 @@ pattern IfThenElse cond thens elses = If cond thens (Just elses)
 
 pattern IIFE :: [DartExpr] -> DartExpr
 pattern IIFE body = FnCall (Lambda [] (Block body)) []
+
+-- recursion-schemes
+
+makeBaseFunctor ''DartExpr
+-- deriveShow ''DartExprF
+
+everywhere :: (DartExpr -> DartExpr) -> DartExpr -> DartExpr
+everywhere f e = cata (f . embed) e
+
+everywhereTopDown :: (DartExpr -> DartExpr) -> DartExpr -> DartExpr
+everywhereTopDown f = embed . fmap (everywhereTopDown f) . project . f
+
+-- FIXME: Verify that this doesn't double-count.
+everything :: Monoid r => (DartExpr -> r) -> DartExpr -> r
+everything f e = foldMap f (project e)

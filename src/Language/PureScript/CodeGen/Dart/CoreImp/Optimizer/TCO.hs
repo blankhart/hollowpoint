@@ -1,133 +1,137 @@
 module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.TCO where
 
-{-
-
 import Prelude.Compat
 
-import Data.Text (Text)
+import Data.Monoid (Sum(..))
 import qualified Language.PureScript.Constants as C
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
+import Language.PureScript.CodeGen.Dart.Ident
 import Safe (headDef, tailSafe)
 
 -- | Eliminate tail calls
-tco :: AST -> AST
+tco :: DartExpr -> DartExpr
 tco = everywhere convert where
-  tcoVar :: Text -> Text
+  tcoVar :: DartIdent -> DartIdent
   tcoVar arg = "$tco_var_" <> arg
 
-  copyVar :: Text -> Text
+  copyVar :: DartIdent -> DartIdent
   copyVar arg = "$copy_" <> arg
 
-  tcoDone :: Text
+  tcoDone :: DartIdent
   tcoDone = "$tco_done"
 
-  tcoLoop :: Text
+  tcoLoop :: DartIdent
   tcoLoop = "$tco_loop"
 
-  tcoResult :: Text
+  tcoResult :: DartIdent
   tcoResult = "$tco_result"
 
-  convert :: AST -> AST
-  convert (VariableIntroduction ss name (Just fn@Function {}))
+  convert :: DartExpr -> DartExpr
+  convert (VarDecl name fn@FnDecl {})
       | isTailRecursive name body'
-      = VariableIntroduction ss name (Just (replace (toLoop name outerArgs innerArgs body')))
+      = VarDecl name (replace (toLoop name outerArgs innerArgs body'))
     where
       innerArgs = headDef [] argss
       outerArgs = concat . reverse $ tailSafe argss
       (argss, body', replace) = collectAllFunctionArgs [] id fn
   convert js = js
 
-  collectAllFunctionArgs :: [[Text]] -> (AST -> AST) -> AST -> ([[Text]], AST, AST -> AST)
-  collectAllFunctionArgs allArgs f (Function s1 ident args (Block s2 (body@(Return _ _):_))) =
-    collectAllFunctionArgs (args : allArgs) (\b -> f (Function s1 ident (map copyVar args) (Block s2 [b]))) body
-  collectAllFunctionArgs allArgs f (Function ss ident args body@(Block _ _)) =
-    (args : allArgs, body, f . Function ss ident (map copyVar args))
-  collectAllFunctionArgs allArgs f (Return s1 (Function s2 ident args (Block s3 [body]))) =
-    collectAllFunctionArgs (args : allArgs) (\b -> f (Return s1 (Function s2 ident (map copyVar args) (Block s3 [b])))) body
-  collectAllFunctionArgs allArgs f (Return s1 (Function s2 ident args body@(Block _ _))) =
-    (args : allArgs, body, f . Return s1 . Function s2 ident (map copyVar args))
+  collectAllFunctionArgs :: [[DartIdent]] -> (DartExpr -> DartExpr) -> DartExpr -> ([[DartIdent]], DartExpr, DartExpr -> DartExpr)
+  collectAllFunctionArgs allArgs f (FnDecl ident args (Block (body@(Return (Just _)):_))) =
+    collectAllFunctionArgs (args : allArgs) (\b -> f (FnDecl ident (map copyVar args) (Block [b]))) body
+  collectAllFunctionArgs allArgs f (FnDecl ident args body@(Block _)) =
+    (args : allArgs, body, f . FnDecl ident (map copyVar args))
+  collectAllFunctionArgs allArgs f (Return (Just (FnDecl ident args (Block [body])))) =
+    collectAllFunctionArgs (args : allArgs) (\b -> f (Return (Just (FnDecl ident (map copyVar args) (Block [b]))))) body
+  collectAllFunctionArgs allArgs f (Return (Just (FnDecl ident args body@(Block _)))) =
+    (args : allArgs, body, f . Return . Just . FnDecl ident (map copyVar args))
   collectAllFunctionArgs allArgs f body = (allArgs, body, f)
 
-  isTailRecursive :: Text -> AST -> Bool
+  isTailRecursive :: DartIdent -> DartExpr -> Bool
   isTailRecursive ident js = countSelfReferences js > 0 && allInTailPosition js where
-    countSelfReferences = everything (+) match where
-      match :: AST -> Int
-      match (Var _ ident') | ident == ident' = 1
+    countSelfReferences = getSum . everything (Sum . match) where
+      match :: DartExpr -> Int
+      match (VarRef ident') | ident == ident' = 1
       match _ = 0
 
-    allInTailPosition (Return _ expr)
-      | isSelfCall ident expr = countSelfReferences expr == 1
-      | otherwise = countSelfReferences expr == 0
-    allInTailPosition (While _ js1 body)
-      = countSelfReferences js1 == 0 && allInTailPosition body
-    allInTailPosition (For _ _ js1 js2 body)
-      = countSelfReferences js1 == 0 && countSelfReferences js2 == 0 && allInTailPosition body
-    allInTailPosition (IfElse _ js1 body el)
-      = countSelfReferences js1 == 0 && allInTailPosition body && all allInTailPosition el
-    allInTailPosition (Block _ body)
+    allInTailPosition (Return val) = case val of
+      Just expr
+        | isSelfCall ident expr -> countSelfReferences expr == 1
+        | otherwise -> countSelfReferences expr == 0
+      Nothing -> True
+    allInTailPosition (While cond body)
+      = countSelfReferences cond == 0 && allInTailPosition body
+    allInTailPosition (If cond body el)
+      = countSelfReferences cond == 0 && allInTailPosition body && all allInTailPosition el
+    allInTailPosition (Block body)
       = all allInTailPosition body
-    allInTailPosition (Throw _ js1)
-      = countSelfReferences js1 == 0
-    allInTailPosition (ReturnNoResult _)
-      = True
-    allInTailPosition (VariableIntroduction _ _ js1)
-      = all ((== 0) . countSelfReferences) js1
-    allInTailPosition (Assignment _ _ js1)
-      = countSelfReferences js1 == 0
-    allInTailPosition (Comment _ _ js1)
-      = allInTailPosition js1
+    allInTailPosition (Throw err)
+      = countSelfReferences err == 0
+    allInTailPosition (VarDecl _ val)
+      = countSelfReferences val == 0
+    allInTailPosition (VarAssign _ val)
+      = countSelfReferences val == 0
+    allInTailPosition (Comment _ expr)
+      = allInTailPosition expr
+    allInTailPosition (Annotation _ expr)
+      = allInTailPosition expr
     allInTailPosition _
       = False
 
-  toLoop :: Text -> [Text] -> [Text] -> AST -> AST
-  toLoop ident outerArgs innerArgs js =
-      Block rootSS $
-        map (\arg -> VariableIntroduction rootSS (tcoVar arg) (Just (Var rootSS (copyVar arg)))) outerArgs ++
-        [ VariableIntroduction rootSS tcoDone (Just (BooleanLiteral rootSS False))
-        , VariableIntroduction rootSS tcoResult Nothing
-        , Function rootSS (Just tcoLoop) (outerArgs ++ innerArgs) (Block rootSS [loopify js])
-        , While rootSS (Unary rootSS Not (Var rootSS tcoDone))
-            (Block rootSS
-              [(Assignment rootSS (Var rootSS tcoResult) (App rootSS (Var rootSS tcoLoop) ((map (Var rootSS . tcoVar) outerArgs) ++ (map (Var rootSS . copyVar) innerArgs))))])
-        , Return rootSS (Var rootSS tcoResult)
-        ]
-    where
-    rootSS = Nothing
+  toLoop :: DartIdent -> [DartIdent] -> [DartIdent] -> DartExpr -> DartExpr
+  toLoop ident outerArgs innerArgs js = Block $
+    map (\arg -> VarDecl (tcoVar arg) (VarRef (copyVar arg))) outerArgs
+    ++
+    [ VarDecl tcoDone (BooleanLiteral False)
+    , VarDecl tcoResult (VarRef "null") -- Empty initializer
+    , FnDecl (Just tcoLoop) (outerArgs ++ innerArgs) (Block [loopify js])
+    , While (Unary Not (VarRef tcoDone)) $ Block $
+        [(VarAssign
+          (VarRef tcoResult)
+          (FnCall
+            (VarRef tcoLoop)
+            ((map (VarRef . tcoVar) outerArgs) ++ (map (VarRef . copyVar) innerArgs)
+            )
+          )
+        )]
+    , Return (Just (VarRef tcoResult))
+    ]
 
-    loopify :: AST -> AST
-    loopify (Return ss ret)
-      | isSelfCall ident ret =
-        let
-          allArgumentValues = concat $ collectArgs [] ret
-        in
-          Block ss $
-            zipWith (\val arg ->
-              Assignment ss (Var ss (tcoVar arg)) val) allArgumentValues outerArgs
-            ++ zipWith (\val arg ->
-              Assignment ss (Var ss (copyVar arg)) val) (drop (length outerArgs) allArgumentValues) innerArgs
-            ++ [ ReturnNoResult ss ]
-      | otherwise = Block ss [ markDone, Return ss ret ]
-    loopify (ReturnNoResult ss) = Block ss [ markDone, ReturnNoResult ss ]
-    loopify (While ss cond body) = While ss cond (loopify body)
-    loopify (For ss i js1 js2 body) = For ss i js1 js2 (loopify body)
-    loopify (IfElse ss cond body el) = IfElse ss cond (loopify body) (fmap loopify el)
-    loopify (Block ss body) = Block ss (map loopify body)
+    where
+
+    loopify :: DartExpr -> DartExpr
+    loopify (Return val) = case val of
+      Just ret
+        | isSelfCall ident ret ->
+          let
+            allArgumentValues = concat $ collectArgs [] ret
+          in
+            Block $
+              zipWith (\val arg ->
+                VarAssign (VarRef (tcoVar arg)) val) allArgumentValues outerArgs
+              ++ zipWith (\val arg ->
+                VarAssign (VarRef (copyVar arg)) val) (drop (length outerArgs) allArgumentValues) innerArgs
+              ++ [ Return Nothing ]
+        | otherwise -> Block [ markDone, Return (Just ret) ]
+      Nothing ->
+        Block [ markDone, Return Nothing ]
+    loopify (While cond body) = While cond (loopify body)
+    loopify (If cond body el) = If cond (loopify body) (fmap loopify el)
+    loopify (Block body) = Block (map loopify body)
     loopify other = other
 
-    markDone :: AST
+    markDone :: DartExpr
     markDone =
-      Assignment Nothing (Var Nothing tcoDone) (BooleanLiteral Nothing True)
+      VarAssign (VarRef tcoDone) (BooleanLiteral True)
 
-    collectArgs :: [[AST]] -> AST -> [[AST]]
-    collectArgs acc (App _ fn []) =
+    collectArgs :: [[DartExpr]] -> DartExpr -> [[DartExpr]]
+    collectArgs acc (FnCall fn []) =
       -- count 0-argument applications as single-argument so we get the correct number of args
-      collectArgs ([Var Nothing C.undefined] : acc) fn
-    collectArgs acc (App _ fn args') = collectArgs (args' : acc) fn
+      collectArgs ([VarRef C.undefined] : acc) fn
+    collectArgs acc (FnCall fn args') = collectArgs (args' : acc) fn
     collectArgs acc _ = acc
 
-  isSelfCall :: Text -> AST -> Bool
-  isSelfCall ident (App _ (Var _ ident') _) = ident == ident'
-  isSelfCall ident (App _ fn _) = isSelfCall ident fn
+  isSelfCall :: DartIdent -> DartExpr -> Bool
+  isSelfCall ident (FnCall (VarRef ident') _) = ident == ident'
+  isSelfCall ident (FnCall fn _) = isSelfCall ident fn
   isSelfCall _ _ = False
-
--}

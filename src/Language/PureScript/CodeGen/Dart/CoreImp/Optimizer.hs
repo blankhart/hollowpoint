@@ -1,6 +1,7 @@
-module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer where
+module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer (
+  optimize
+) where
 
-{-
 import Prelude.Compat
 
 import Control.Monad ((>=>))
@@ -12,15 +13,15 @@ import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.MagicDo
 import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.TCO
 import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Unused
 
--- | Apply a series of optimizer passes to CoreImp AST
-optimize :: MonadSupply m => AST -> m AST
+-- | Apply a series of optimizer passes to CoreImp DartExpr
+optimize :: MonadSupply m => DartExpr -> m DartExpr
 optimize =
       untilFixedPoint (return . magicDoEffect)
   >=> return . tco
   >=> untilFixedPoint (return . tidyUp)
 
   where
-    tidyUp :: AST -> AST
+    tidyUp :: DartExpr -> DartExpr
     tidyUp = foldl' (.) id
       [ collapseNestedBlocks
       , collapseNestedIfs
@@ -32,9 +33,18 @@ optimize =
       , inlineVariables
       ]
 
+untilFixedPoint :: (Monad m, Eq a) => (a -> m a) -> a -> m a
+untilFixedPoint f = go
+  where
+    go a = do
+      a' <- f a
+      if a' == a
+        then return a'
+        else go a'
+
 {-
--- | Apply a series of optimizer passes to CoreImp AST
-optimize :: MonadSupply m => AST -> m AST
+-- | Apply a series of optimizer passes to CoreImp DartExpr
+optimize :: MonadSupply m => DartExpr -> m DartExpr
 optimize ast = do
     ast' <- untilFixedPoint (inlineFnComposition . inlineUnsafeCoerce . inlineUnsafePartial . tidyUp . applyAll
       [ inlineCommonValues
@@ -45,7 +55,7 @@ optimize ast = do
       =<< untilFixedPoint (return . magicDoEff)
       =<< untilFixedPoint (return . magicDoEffect) ast'
   where
-    tidyUp :: AST -> AST
+    tidyUp :: DartExpr -> DartExpr
     tidyUp = applyAll
       [ collapseNestedBlocks
       , collapseNestedIfs
@@ -56,12 +66,4 @@ optimize ast = do
       , evaluateIifes
       , inlineVariables
       ]
--}
-
-untilFixedPoint :: (Monad m, Eq a) => (a -> m a) -> a -> m a
-untilFixedPoint f = go
-  where
-  go a = do
-   a' <- f a
-   if a' == a then return a' else go a'
 -}
