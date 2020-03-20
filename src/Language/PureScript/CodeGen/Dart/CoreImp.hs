@@ -106,7 +106,7 @@ fromDecls mn cloStripComments bindings = do
 
     e -> fromExpr e >>= \case
       decl@(D.ClassDecl{}) -> return decl
-      expr -> return $ D.VarDecl (fromIdent i) expr
+      expr -> return $ D.Val (fromIdent i) expr
 
   fromExpr :: Expr Ann -> m DartExpr
   fromExpr = \case
@@ -123,6 +123,7 @@ fromDecls mn cloStripComments bindings = do
     Abs (_, _, _, Just IsTypeClassConstructor) _ ctor ->
       internalError $ "Encountered a type class constructor not processed as a top-level binding:" <> show ctor
 
+    -- TODO: Rewrite as a function declaration and add an inline pragma.
     Abs _ (Ident "dict") (Accessor _ prop val@(Var _ (Qualified Nothing (Ident "dict")))) -> do
       let field = fromMaybe (internalError $ "Encountered a typeclass method name that was not a decodable string:" <> show prop) (decodeString prop)
       body <- D.ObjectAccessor (fromAnyName field) <$> fromExpr val
@@ -245,7 +246,7 @@ fromDecls mn cloStripComments bindings = do
   fromCases :: [CaseAlternative Ann] -> [DartExpr] -> m DartExpr
   fromCases binders vals = do
     valNames <- map fromAnyName <$> replicateM (length vals) freshName
-    let assignments = zipWith D.VarDecl valNames vals
+    let assignments = zipWith D.Val valNames vals
     imps <- forM binders $ \(CaseAlternative bs result) -> do
       ret <- fromGuards result
       go valNames ret bs
@@ -278,7 +279,7 @@ fromDecls mn cloStripComments bindings = do
     LiteralBinder _ lit ->
       fromLiteralBinder varRef done lit
     VarBinder _ i ->
-      return (D.VarDecl (fromIdent i) varRef : done)
+      return (D.Val (fromIdent i) varRef : done)
     ConstructorBinder (_, _, _, meta) _ ctor bs -> case (meta, bs) of
       (Just IsNewtype, [b]) -> fromCaseBinder varRef done b
       (Just (IsConstructor ctorType fs), _) -> do
@@ -297,11 +298,11 @@ fromDecls mn cloStripComments bindings = do
             argVar <- fromAnyName <$> freshName
             done'' <- go remain done'
             imp <- fromCaseBinder (D.VarRef argVar) done'' binder
-            return (D.VarDecl argVar (D.ObjectAccessor (fromIdent field) varRef) : imp)
+            return (D.Val argVar (D.ObjectAccessor (fromIdent field) varRef) : imp)
       _ -> internalError $ "Encountered invalid constructor binder:" <> show ctor
     NamedBinder _ ident binder -> do
       imp <- fromCaseBinder varRef done binder
-      return (D.VarDecl (fromIdent ident) varRef : imp)
+      return (D.Val (fromIdent ident) varRef : imp)
 
   fromLiteralBinder :: DartExpr -> [DartExpr] -> Literal (Binder Ann) -> m [DartExpr]
   fromLiteralBinder varRef done = \case
@@ -325,7 +326,7 @@ fromDecls mn cloStripComments bindings = do
           propVar <- fromAnyName <$> freshName
           done'' <- go done' bs'
           imp <- fromCaseBinder (D.VarRef propVar) done'' binder
-          return (D.VarDecl propVar (D.RecordAccessor prop varRef) : imp)
+          return (D.Val propVar (D.RecordAccessor prop varRef) : imp)
     ArrayLiteral bs -> do
       imp <- go done 0 bs
       return . pure $
@@ -340,4 +341,4 @@ fromDecls mn cloStripComments bindings = do
           elVar <- fromAnyName <$> freshName
           done'' <- go done' (index + 1) bs'
           imp <- fromCaseBinder (D.VarRef elVar) done'' binder
-          return $ D.VarDecl elVar (D.ArrayAccessor index varRef) : imp
+          return $ D.Val elVar (D.ArrayAccessor index varRef) : imp

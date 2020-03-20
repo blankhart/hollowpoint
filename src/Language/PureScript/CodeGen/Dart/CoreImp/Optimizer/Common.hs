@@ -26,12 +26,14 @@ replaceIdents vars = everywhere replace
   replace v@(VarRef var) = fromMaybe v $ lookup var vars
   replace other = other
 
+-- TODO: Is this check needed?  Now AST tracks mutability.
+-- But note reference to FnDecl args - mutability presumed.
 isReassigned :: DartIdent -> DartExpr -> Bool
 isReassigned var1 = getAny . everything (Any . check)
   where
   check :: DartExpr -> Bool
   check (FnDecl _ args _) | var1 `elem` args = True
-  check (VarDecl arg _) | var1 == arg = True
+  check (VarDecl _ arg _) | var1 == arg = True
   check (VarAssign (VarRef arg) _) | var1 == arg = True
   check _ = False
 

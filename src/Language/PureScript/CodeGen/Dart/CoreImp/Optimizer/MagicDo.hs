@@ -59,7 +59,7 @@ magicDo effectModule C.EffectDictionaries{..} = everywhereTopDown convert
     | isBind bind =
 --        trace ("Desugar bind match on " <> show expr) $
         FnDecl Nothing [] $
-          Block ((VarDecl arg (FnCall m [])) : map applyReturns js)
+          Block ((Val arg (FnCall m [])) : map applyReturns js)
   -- Desugar untilE
   convert expr@(FnCall (FnCall f [arg]) [])
     | isEffFunc edUntil f =

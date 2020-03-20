@@ -117,12 +117,19 @@ instance Pretty DartExpr where
     Block decls ->
       blockedDecls (semicolonize <$> decls)
 
-    VarDecl name expr ->
-      -- FIXME: This will fail for a mutable TCO variable.
-      -- TODO: If expr is a literal, this can be declared const
-      -- unless it is part of the TCO optimization and needs the ability
-      -- to be reassigneds
-      "final" <+> pretty name <+> "=" <+> pretty expr
+    VarDecl mut name expr ->
+      modifier <+> pretty name <+> "=" <+> pretty expr
+      where
+        modifier = case mut of
+          -- Reassignment required by TCO optimization
+          Mutable -> "var"
+          -- Literals are compile-time constants, unless mutable
+          -- Reassignment not necessary for ordinary variable
+          Immutable -> case expr of
+            StringLiteral{} -> "const"
+            NumericLiteral{} -> "const"
+            BooleanLiteral{} -> "const"
+            _ -> "final"
 
     VarRef name ->
       pretty name

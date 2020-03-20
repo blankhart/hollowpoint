@@ -106,10 +106,10 @@ inlineVariables = everywhere $ removeFromBlock go
     go :: [DartExpr] -> [DartExpr]
     go = \case
       [] -> []
-      (VarDecl var expr) : sts
+      (Val val expr) : sts
         | shouldInline expr
-          && not (any (isReassigned var) sts)
+          && not (any (isReassigned val) sts)
           && not (any (isRebound expr) sts)
-          && not (any (isUpdated var) sts)
-          -> go (map (replaceIdent var expr) sts)
+          && not (any (isUpdated val) sts)
+          -> go (map (replaceIdent val expr) sts)
       s:sts -> s : go sts
