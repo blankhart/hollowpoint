@@ -67,7 +67,7 @@ isUpdated var1 = getAny . everything (Any . check)
 -- Inliner, Unused
 removeFromBlock :: ([DartExpr] -> [DartExpr]) -> DartExpr -> DartExpr
 removeFromBlock go (Block sts) = Block (go sts)
-removeFromBlock _  js = js
+removeFromBlock _ expr = expr
 
 -- MagicDo
 -- NOTE: Rewritten on the assumption only relevant to typeclass dictionaries.

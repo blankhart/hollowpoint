@@ -70,7 +70,7 @@ tryTCO x = if x < 0 then x else tryTCO (x - 1)
 
 main :: Effect Unit
 main = do
-  print $ show (DatumB 5 "Five" true)
+  print $ (show >>> show >>> show) (DatumB 5 "Five" true)
   print $ show (Novelty "newness")
   print $ show Nullary
   let object = { hello : "hello", world: "world" }

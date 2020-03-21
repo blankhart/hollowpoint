@@ -9,7 +9,7 @@ module Language.PureScript.CodeGen.Dart.CoreImp.AST where
 
 import Prelude.Compat
 
-import Control.Monad ((>=>))
+import Control.Monad ((>=>), (<=<))
 import Control.Monad.Identity (Identity(..), runIdentity)
 
 import Data.Foldable (fold)
@@ -202,8 +202,8 @@ pattern IfEqual a b thens = If (Binary EqualTo a b) thens Nothing
 pattern IfThenElse :: DartExpr -> DartExpr -> DartExpr -> DartExpr
 pattern IfThenElse cond thens elses = If cond thens (Just elses)
 
-pattern IIFE :: [DartExpr] -> DartExpr
-pattern IIFE body = FnCall (Lambda [] (Block body)) []
+pattern IIFE :: [DartIdent] -> [DartExpr] -> DartExpr
+pattern IIFE args body = FnCall (Lambda args (Block body)) []
 
 -- TODO: Change to Val, and make VarDecl the AST constructor
 pattern Val :: DartIdent -> DartExpr -> DartExpr
@@ -211,6 +211,9 @@ pattern Val i e = VarDecl Immutable i e
 
 pattern Var :: DartIdent -> DartExpr -> DartExpr
 pattern Var i e = VarDecl Mutable i e
+
+pattern Ret :: DartExpr -> DartExpr
+pattern Ret e = Return (Just e)
 
 pattern Inline :: DartExpr -> DartExpr
 pattern Inline e = Annotation "pragma(\"vm:prefer-inline\")" e
@@ -221,11 +224,17 @@ makeBaseFunctor ''DartExpr
 deriveShow ''DartExprF
 
 everywhere :: (DartExpr -> DartExpr) -> DartExpr -> DartExpr
-everywhere f = cata (f . embed)
+everywhere f =
+  cata (f . embed)
 
 everywhereTopDown :: (DartExpr -> DartExpr) -> DartExpr -> DartExpr
-everywhereTopDown f = embed . fmap (everywhereTopDown f) . project . f
+everywhereTopDown f =
+  embed . fmap (everywhereTopDown f) . project . f
 
--- FIXME: Fails completely, because only captures nested ones.
+everywhereTopDownM :: Monad m => (DartExpr -> m DartExpr) -> DartExpr -> m DartExpr
+everywhereTopDownM f =
+  return . embed <=< traverse (everywhereTopDownM f) . project <=< f
+
 everything :: Monoid r => (DartExpr -> r) -> DartExpr -> r
-everything f = para $ \e -> (f . embed . fmap fst) e <> fold (fmap snd e)
+everything f =
+  para $ \e -> (f . embed . fmap fst) e <> fold (fmap snd e)

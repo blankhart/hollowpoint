@@ -13,11 +13,12 @@ removeCodeAfterReturnStatements = everywhere (removeFromBlock go)
     go jss
       | not (any isReturn jss) = jss
       | otherwise = let (body, ret : _) = break isReturn jss in body ++ [ret]
-    isReturn Return{} = True
-    isReturn _ = False
+    isReturn = \case { Return{} -> True; _ -> False }
 
-removeUndefinedApp :: DartExpr -> DartExpr
-removeUndefinedApp = everywhere $ \case
-  FnCall fn [VarRef arg]
-    | arg == C.undefined -> FnCall fn []
+-- NOTE: Is this advantageous in some fashion, either at runtime
+-- or for later optimizations?  The function takes a null parameter
+-- that is presumably unused.
+removeNullApp :: DartExpr -> DartExpr
+removeNullApp = everywhere $ \case
+  FnCall fn [VarRef arg] | arg == "null" -> FnCall fn []
   expr -> expr

@@ -16,7 +16,12 @@ import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Unused
 -- | Apply a series of optimizer passes to CoreImp DartExpr
 optimize :: MonadSupply m => DartExpr -> m DartExpr
 optimize =
-      untilFixedPoint (return . tidyUp)
+      untilFixedPoint
+        ( inlineFnComposition
+        . inlineUnsafeCoerce
+        . inlineUnsafePartial
+        . tidyUp
+        )
   >=> untilFixedPoint (return . magicDoEffect)
   >=> return . tco
   >=> untilFixedPoint (return . tidyUp)
@@ -27,10 +32,11 @@ optimize =
       [ collapseNestedBlocks
       , collapseNestedIfs
       , removeCodeAfterReturnStatements
-      , removeUndefinedApp
+      -- NOTE: Does not interact well with MagicDo
+      -- , removeNullApp
       , unThunk
       , etaConvert
-      , evaluateIifes
+      , evaluateIIFEs
       , inlineVariables
       ]
 

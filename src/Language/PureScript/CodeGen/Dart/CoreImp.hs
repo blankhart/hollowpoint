@@ -101,7 +101,7 @@ fromDecls mn cloStripComments bindings = do
         )
         (case ret of
           D.Block _ -> ret
-          _ -> D.Block [D.Return (Just ret)]
+          _ -> D.Block [D.Ret ret]
         )
 
     e -> fromExpr e >>= \case
@@ -129,7 +129,7 @@ fromDecls mn cloStripComments bindings = do
       body <- D.ObjectAccessor (fromAnyName field) <$> fromExpr val
       return $ D.Lambda
         ["dict"]
-        (D.Block [D.Return (Just body)])
+        (D.Block [D.Ret body])
 
     -- Anonymous function declaration
     Abs _ arg val -> do
@@ -142,7 +142,7 @@ fromDecls mn cloStripComments bindings = do
           )
           (case ret of
             D.Block _ -> ret
-            _ -> D.Block [D.Return (Just ret)]
+            _ -> D.Block [D.Ret ret]
           )
 
     Accessor _ prop val ->
@@ -200,7 +200,7 @@ fromDecls mn cloStripComments bindings = do
     Let _ bindings expr -> do
       decls <- concat <$> mapM fromBinding bindings
       ret <- fromExpr expr
-      return $ D.IIFE (decls ++ [D.Return (Just ret)])
+      return $ D.IIFE [] (decls ++ [D.Ret ret])
 
     -- Newtype constructor
     -- TODO: Figure out why the IsNewtype case gets eliminated.
@@ -250,7 +250,7 @@ fromDecls mn cloStripComments bindings = do
     imps <- forM binders $ \(CaseAlternative bs result) -> do
       ret <- fromGuards result
       go valNames ret bs
-    return $ D.IIFE
+    return $ D.IIFE []
       ( assignments
       ++ concat imps
       ++ [D.Throw (D.FnCall (D.VarRef "FallThroughError") [])]
@@ -270,8 +270,8 @@ fromDecls mn cloStripComments bindings = do
         Left gs -> for gs $ \(cond, val) -> do
           cond' <- fromExpr cond
           val' <- fromExpr val
-          return $ D.IfThen cond' (D.Block [D.Return (Just val')])
-        Right v -> return . D.Return . Just <$> fromExpr v
+          return $ D.IfThen cond' (D.Block [D.Ret val'])
+        Right v -> return . D.Ret <$> fromExpr v
 
   fromCaseBinder :: DartExpr -> [DartExpr] -> Binder Ann -> m [DartExpr]
   fromCaseBinder varRef done = \case

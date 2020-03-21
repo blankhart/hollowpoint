@@ -44,7 +44,7 @@ magicDo effectModule C.EffectDictionaries{..} = everywhereTopDown convert
         val
   -- Desugar discard
   -- TODO: Focus attention here
-  -- TODO: Shouldn't the next one take an unused parameter?  Maybe the issue is that other optimizations run first in the PS version.
+  -- TODO: Shouldn't the next one take an unused parameter?  Maybe the issue is that other optimizations run first in the PS version.  Verify this works together with removeNullApp.
   convert expr@(FnCall (FnCall bind [m]) [FnDecl Nothing [_] (Block js)])
     | isDiscard bind =
 --        trace ("Desugar discard match on " <> show expr) $
