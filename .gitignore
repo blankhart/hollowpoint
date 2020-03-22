@@ -16,6 +16,14 @@ cabal.project.local*
 # project
 example/pkg/*
 tmp/
+**/.dart_tool/
 **/.hollowpoint/
+**/.idea/
+**/.metadata
+**/.packages/
 **/output
 **/target/
+**/android/
+**/ios/
+**/*.iml
+

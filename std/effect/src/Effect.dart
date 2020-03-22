@@ -5,7 +5,8 @@ pureE(a) => () => a;
 bindE(a) => (f) => () => f(a())();
 
 untilE(f) => () {
-  while (!f());
+  while (!f()) {
+  }
   return {};
 };
 

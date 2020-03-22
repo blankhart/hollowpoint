@@ -5,6 +5,7 @@ import Prelude.Compat
 import Control.Monad.Supply.Class (MonadSupply, freshName)
 
 import Data.Either (rights)
+import Data.Foldable (foldl')
 import Data.Maybe (fromMaybe)
 import Data.String (IsString, fromString)
 import Data.Text (Text)
@@ -12,9 +13,16 @@ import qualified Data.Text as T
 
 import Language.PureScript.PSString (PSString)
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
-import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Common (isDict, isReassigned, isRebound, isUpdated, removeFromBlock, replaceIdent, replaceIdents)
+import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Common (isDict, isDict', isReassigned, isRebound, isUpdated, removeFromBlock, replaceIdent, replaceIdents)
 import Language.PureScript.CodeGen.Dart.Ident
 import qualified Language.PureScript.Constants as C
+
+collapseExpressionBlocks :: DartExpr -> DartExpr
+collapseExpressionBlocks = everywhere $ \case
+  FnDecl fn args (Block [Ret expr])
+    | isFatArrowizable expr
+      -> FnDecl fn args expr
+  expr -> expr
 
 collapseNestedBlocks :: DartExpr -> DartExpr
 collapseNestedBlocks = everywhere $ \case
@@ -162,36 +170,46 @@ inlineFnComposition = everywhereTopDownM $ \case
       isDict (C.controlSemigroupoid, C.semigroupoidFn) dict'
       && isDict (C.controlSemigroupoid, C.composeFlipped) fn
 
-{-
-
+-- NOTE: Some of these are integer operations intended to optimize
+-- numerical computation in JavaScript by or-ing with zero. These
+-- aren't necessary in Dart.
 inlineCommonValues :: DartExpr -> DartExpr
-inlineCommonValues = everywhere convert
-  where
-  convert :: DartExpr -> DartExpr
-  convert (App ss fn [dict])
-    | isDict' [semiringNumber, semiringInt] dict && isDict fnZero fn = NumericLiteral ss (Left 0)
-    | isDict' [semiringNumber, semiringInt] dict && isDict fnOne fn = NumericLiteral ss (Left 1)
-    | isDict boundedBoolean dict && isDict fnBottom fn = BooleanLiteral ss False
-    | isDict boundedBoolean dict && isDict fnTop fn = BooleanLiteral ss True
-  convert (App ss (App _ fn [dict]) [x])
-    | isDict ringInt dict && isDict fnNegate fn = Binary ss BitwiseOr (Unary ss Negate x) (NumericLiteral ss (Left 0))
-  convert (App ss (App _ (App _ fn [dict]) [x]) [y])
-    | isDict semiringInt dict && isDict fnAdd fn = intOp ss Add x y
-    | isDict semiringInt dict && isDict fnMultiply fn = intOp ss Multiply x y
-    | isDict ringInt dict && isDict fnSubtract fn = intOp ss Subtract x y
-  convert other = other
-  fnZero = (C.dataSemiring, C.zero)
-  fnOne = (C.dataSemiring, C.one)
-  fnBottom = (C.dataBounded, C.bottom)
-  fnTop = (C.dataBounded, C.top)
-  fnAdd = (C.dataSemiring, C.add)
-  fnMultiply = (C.dataSemiring, C.mul)
-  fnSubtract = (C.dataRing, C.sub)
-  fnNegate = (C.dataRing, C.negate)
-  intOp ss op x y = Binary ss BitwiseOr (Binary ss op x y) (NumericLiteral ss (Left 0))
+inlineCommonValues = everywhere $ \case
+
+  FnCall fn [dict]
+    | isDict' [semiringNumber, semiringInt] dict
+      && isDict (C.dataSemiring, C.zero) fn
+      -> IntegerLiteral 0
+    | isDict' [semiringNumber, semiringInt] dict
+      && isDict (C.dataSemiring, C.one) fn
+      -> IntegerLiteral 1
+    | isDict boundedBoolean dict
+      && isDict (C.dataBounded, C.bottom) fn
+      -> BooleanLiteral False
+    | isDict boundedBoolean dict
+      && isDict (C.dataBounded, C.top) fn
+      -> BooleanLiteral True
+
+  FnCall (FnCall fn [dict]) [x]
+    | isDict ringInt dict
+      && isDict (C.dataRing, C.negate) fn
+      -> Unary Negate x
+
+  FnCall (FnCall (FnCall fn [dict]) [x]) [y]
+    | isDict semiringInt dict
+      && isDict (C.dataSemiring, C.add) fn
+      -> Binary Add x y
+    | isDict semiringInt dict
+      && isDict (C.dataSemiring, C.mul) fn
+      -> Binary Multiply x y
+    | isDict ringInt dict
+      && isDict (C.dataRing, C.sub) fn
+      -> Binary Subtract x y
+
+  expr -> expr
 
 inlineCommonOperators :: DartExpr -> DartExpr
-inlineCommonOperators = everywhereTopDown $ applyAll $
+inlineCommonOperators = everywhereTopDown $ foldl' (.) id $
   [ binary semiringNumber opAdd Add
   , binary semiringNumber opMul Multiply
 
@@ -243,103 +261,135 @@ inlineCommonOperators = everywhereTopDown $ applyAll $
   , binary' C.dataIntBits C.xor BitwiseXor
   , binary' C.dataIntBits C.shl ShiftLeft
   , binary' C.dataIntBits C.shr ShiftRight
-  , binary' C.dataIntBits C.zshr ZeroFillShiftRight
+--  , binary' C.dataIntBits C.zshr ZeroFillShiftRight
   , unary'  C.dataIntBits C.complement BitwiseNot
 
-  , inlineNonClassFunction (isModFn (C.dataFunction, C.apply)) $ \f x -> App Nothing f [x]
-  , inlineNonClassFunction (isModFn (C.dataFunction, C.applyFlipped)) $ \x f -> App Nothing f [x]
-  , inlineNonClassFunction (isModFnWithDict (C.dataArray, C.unsafeIndex)) $ flip (Indexer Nothing)
+  , inlineNonClassFunction (isModFn (C.dataFunction, C.apply)) $
+      \f x -> FnCall f [x]
+  , inlineNonClassFunction (isModFn (C.dataFunction, C.applyFlipped)) $
+      \x f -> FnCall f [x]
+  , inlineNonClassFunction (isModFnWithDict (C.dataArray, C.unsafeIndex)) $
+      \f x -> Accessor ArrayIndex x f
+  ] {- ++
+  [ fn
+    | i <- [0..10]
+    , fn <- [ mkFn i
+            , runFn i
+            ]
   ] ++
-  [ fn | i <- [0..10], fn <- [ mkFn i, runFn i ] ] ++
-  [ fn | i <- [0..10], fn <- [ mkEffFn C.controlMonadEffUncurried C.mkEffFn i, runEffFn C.controlMonadEffUncurried C.runEffFn i ] ] ++
-  [ fn | i <- [0..10], fn <- [ mkEffFn C.effectUncurried C.mkEffectFn i, runEffFn C.effectUncurried C.runEffectFn i ] ]
-  where
-  binary :: (Text, PSString) -> (Text, PSString) -> BinaryOperator -> DartExpr -> DartExpr
-  binary dict fns op = convert where
-    convert :: DartExpr -> DartExpr
-    convert (App ss (App _ (App _ fn [dict']) [x]) [y]) | isDict dict dict' && isDict fns fn = Binary ss op x y
-    convert other = other
-  binary' :: Text -> PSString -> BinaryOperator -> DartExpr -> DartExpr
-  binary' moduleName opString op = convert where
-    convert :: DartExpr -> DartExpr
-    convert (App ss (App _ fn [x]) [y]) | isDict (moduleName, opString) fn = Binary ss op x y
-    convert other = other
-  unary :: (Text, PSString) -> (Text, PSString) -> UnaryOperator -> DartExpr -> DartExpr
-  unary dicts fns op = convert where
-    convert :: DartExpr -> DartExpr
-    convert (App ss (App _ fn [dict']) [x]) | isDict dicts dict' && isDict fns fn = Unary ss op x
-    convert other = other
-  unary' :: Text -> PSString -> UnaryOperator -> DartExpr -> DartExpr
-  unary' moduleName fnName op = convert where
-    convert :: DartExpr -> DartExpr
-    convert (App ss fn [x]) | isDict (moduleName, fnName) fn = Unary ss op x
-    convert other = other
+  [ fn
+    | i <- [0..10]
+    , fn <- [ mkEffFn C.controlMonadEffUncurried C.mkEffFn i
+            , runEffFn C.controlMonadEffUncurried C.runEffFn i
+            ]
+  ] ++
+  [ fn
+    | i <- [0..10]
+    , fn <- [ mkEffFn C.effectUncurried C.mkEffectFn i
+            , runEffFn C.effectUncurried C.runEffectFn i
+            ]
+  ] -}
 
-  mkFn :: Int -> DartExpr -> DartExpr
-  mkFn = mkFn' C.dataFunctionUncurried C.mkFn $ \ss1 ss2 ss3 args js ->
-    Function ss1 Nothing args (Block ss2 [Return ss3 js])
+binary :: (Text, PSString) -> (Text, PSString) -> BinaryOperator -> DartExpr -> DartExpr
+binary dict fns op = \case
+  FnCall (FnCall (FnCall fn [dict']) [x]) [y]
+    | isDict dict dict'
+      && isDict fns fn
+      -> Binary op x y
+  expr -> expr
 
-  mkEffFn :: Text -> Text -> Int -> DartExpr -> DartExpr
-  mkEffFn modName fnName = mkFn' modName fnName $ \ss1 ss2 ss3 args js ->
-    Function ss1 Nothing args (Block ss2 [Return ss3 (App ss3 js [])])
+binary' :: Text -> PSString -> BinaryOperator -> DartExpr -> DartExpr
+binary' moduleName opString op = \case
+  FnCall (FnCall fn [x]) [y]
+    | isDict (moduleName, opString) fn
+      -> Binary op x y
+  expr -> expr
 
-  mkFn' :: Text -> Text -> (Maybe SourceSpan -> Maybe SourceSpan -> Maybe SourceSpan -> [Text] -> DartExpr -> DartExpr) -> Int -> DartExpr -> DartExpr
-  mkFn' modName fnName res 0 = convert where
-    convert :: DartExpr -> DartExpr
-    convert (App _ mkFnN [Function s1 Nothing [_] (Block s2 [Return s3 js])]) | isNFn modName fnName 0 mkFnN =
-      res s1 s2 s3 [] js
-    convert other = other
-  mkFn' modName fnName res n = convert where
-    convert :: DartExpr -> DartExpr
-    convert orig@(App ss mkFnN [fn]) | isNFn modName fnName n mkFnN =
-      case collectArgs n [] fn of
-        Just (args, [Return ss' ret]) -> res ss ss ss' args ret
+unary :: (Text, PSString) -> (Text, PSString) -> UnaryOperator -> DartExpr -> DartExpr
+unary dicts fns op = \case
+  FnCall (FnCall fn [dict']) [x]
+    | isDict dicts dict'
+      && isDict fns fn
+      -> Unary op x
+  expr -> expr
+
+unary' :: Text -> PSString -> UnaryOperator -> DartExpr -> DartExpr
+unary' moduleName fnName op = \case
+  FnCall fn [x]
+    | isDict (moduleName, fnName) fn
+      -> Unary op x
+  expr -> expr
+
+inlineNonClassFunction :: (DartExpr -> Bool) -> (DartExpr -> DartExpr -> DartExpr) -> DartExpr -> DartExpr
+inlineNonClassFunction p f = \case
+  FnCall (FnCall op' [x]) [y] | p op' -> f x y
+  expr -> expr
+
+isModFn :: (Text, PSString) -> DartExpr -> Bool
+isModFn (m, op) = isDict (m, op)
+
+isModFnWithDict :: (Text, PSString) -> DartExpr -> Bool
+isModFnWithDict (m, op) = \case
+  FnCall fn [VarRef _] -> isDict (m, op) fn
+  _ -> False
+
+{-
+mkFn :: Int -> DartExpr -> DartExpr
+mkFn = mkFn' C.dataFunctionUncurried C.mkFn $ \_ _ _ args js ->
+  Lambda args (Block [Ret js])
+
+mkEffFn :: Text -> Text -> Int -> DartExpr -> DartExpr
+mkEffFn modName fnName = mkFn' modName fnName $ \ss1 ss2 ss3 args js ->
+  Lambda args (Block [Ret (FnCall js [])])
+
+mkFn' :: Text -> Text -> (Maybe SourceSpan -> Maybe SourceSpan -> Maybe SourceSpan -> [Text] -> DartExpr -> DartExpr) -> Int -> DartExpr -> DartExpr
+mkFn' modName fnName res 0 = \case
+  FnCall mkFnN [Lambda [_] (Block [Ret js])]
+    | isNFn modName fnName 0 mkFnN
+      -> res s1 s2 s3 [] js
+  expr -> expr
+mkFn' modName fnName res n = \case
+  orig@(FnCall mkFnN [fn])
+    | isNFn modName fnName n mkFnN -> case collectArgs n [] fn of
+        Just (args, [Ret ret]) -> res ss ss ss' args ret
         _ -> orig
-    convert other = other
+  expr -> expr
+
+  where
     collectArgs :: Int -> [Text] -> DartExpr -> Maybe ([Text], [DartExpr])
-    collectArgs 1 acc (Function _ Nothing [oneArg] (Block _ js)) | length acc == n - 1 = Just (reverse (oneArg : acc), js)
-    collectArgs m acc (Function _ Nothing [oneArg] (Block _ [Return _ ret])) = collectArgs (m - 1) (oneArg : acc) ret
-    collectArgs _ _   _ = Nothing
+    collectArgs 1 acc (Lambda [oneArg] (Block js)) | length acc == n - 1
+      = Just (reverse (oneArg : acc), js)
+    collectArgs m acc (Lambda [oneArg] (Block [Ret ret]))
+      = collectArgs (m - 1) (oneArg : acc) ret
+    collectArgs _ _ _ = Nothing
 
-  isNFn :: Text -> Text -> Int -> DartExpr -> Bool
-  isNFn expectMod prefix n (Indexer _ (StringLiteral _ name) (Var _ modName)) | modName == expectMod =
-    name == fromString (T.unpack prefix <> show n)
-  isNFn _ _ _ _ = False
+isNFn :: Text -> Text -> Int -> DartExpr -> Bool
+isNFn expectMod prefix n (Indexer _ (StringLiteral name) (VarRef modName))
+  | modName == expectMod
+    = name == fromString (T.unpack prefix <> show n)
+isNFn _ _ _ _ = False
 
-  runFn :: Int -> DartExpr -> DartExpr
-  runFn = runFn' C.dataFunctionUncurried C.runFn App
+runFn :: Int -> DartExpr -> DartExpr
+runFn = runFn' C.dataFunctionUncurried C.runFn FnDecl
 
-  runEffFn :: Text -> Text -> Int -> DartExpr -> DartExpr
-  runEffFn modName fnName = runFn' modName fnName $ \ss fn acc ->
-    Function ss Nothing [] (Block ss [Return ss (App ss fn acc)])
+--  FIXME: This doesn't work because it is not possible to return a named function.
+runEffFn :: Text -> Text -> Int -> DartExpr -> DartExpr
+runEffFn modName fnName = runFn' modName fnName $ \fn acc ->
+  Lambda [] (Block [Ret (FnDecl fn acc)])
 
-  runFn' :: Text -> Text -> (Maybe SourceSpan -> DartExpr -> [DartExpr] -> DartExpr) -> Int -> DartExpr -> DartExpr
-  runFn' modName runFnName res n = convert where
-    convert :: DartExpr -> DartExpr
-    convert js = fromMaybe js $ go n [] js
-
+runFn' :: Text -> Text -> (DartExpr -> [DartExpr] -> DartExpr) -> Int -> DartExpr -> DartExpr
+runFn' modName runFnName res n js = fromMaybe js $ go n [] js
+  where
     go :: Int -> [DartExpr] -> DartExpr -> Maybe DartExpr
-    go 0 acc (App ss runFnN [fn]) | isNFn modName runFnName n runFnN && length acc == n =
-      Just $ res ss fn acc
-    go m acc (App _ lhs [arg]) = go (m - 1) (arg : acc) lhs
-    go _ _   _ = Nothing
+    go 0 acc (App ss runFnN [fn])
+      | isNFn modName runFnName n runFnN && length acc == n
+        = Just $ res ss fn acc
+    go m acc (App _ lhs [arg])
+      = go (m - 1) (arg : acc) lhs
+    go _ _ _
+      = Nothing
 
-  inlineNonClassFunction :: (DartExpr -> Bool) -> (DartExpr -> DartExpr -> DartExpr) -> DartExpr -> DartExpr
-  inlineNonClassFunction p f = convert where
-    convert :: DartExpr -> DartExpr
-    convert (App _ (App _ op' [x]) [y]) | p op' = f x y
-    convert other = other
-
-  isModFn :: (Text, PSString) -> DartExpr -> Bool
-  isModFn (m, op) (Indexer _ (StringLiteral _ op') (Var _ m')) =
-    m == m' && op == op'
-  isModFn _ _ = False
-
-  isModFnWithDict :: (Text, PSString) -> DartExpr -> Bool
-  isModFnWithDict (m, op) (App _ (Indexer _ (StringLiteral _ op') (Var _ m')) [Var _ _]) =
-    m == m' && op == op'
-  isModFnWithDict _ _ = False
-
+-}
 
 semiringNumber :: forall a b. (IsString a, IsString b) => (a, b)
 semiringNumber = (C.dataSemiring, C.semiringNumber)
@@ -442,5 +492,3 @@ opDisj = (C.dataHeytingAlgebra, C.disj)
 
 opNot :: forall a b. (IsString a, IsString b) => (a, b)
 opNot = (C.dataHeytingAlgebra, C.not)
-
--}

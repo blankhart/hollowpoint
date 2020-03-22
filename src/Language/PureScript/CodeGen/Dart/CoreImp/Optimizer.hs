@@ -21,6 +21,8 @@ optimize =
         . inlineUnsafeCoerce
         . inlineUnsafePartial
         . tidyUp
+        . inlineCommonValues
+        . inlineCommonOperators
         )
   >=> untilFixedPoint (return . magicDoEffect)
   >=> return . tco
@@ -29,7 +31,8 @@ optimize =
   where
     tidyUp :: DartExpr -> DartExpr
     tidyUp = foldl' (.) id
-      [ collapseNestedBlocks
+      [ collapseExpressionBlocks
+      , collapseNestedBlocks
       , collapseNestedIfs
       , removeCodeAfterReturnStatements
       -- NOTE: Does not interact well with MagicDo

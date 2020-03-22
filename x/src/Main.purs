@@ -3,7 +3,37 @@ module Main where
 import Prelude
 import Effect (Effect)
 import Effect.Print (print)
+import Flutter as F
 import Other (_underscored)
+
+{-
+final myApp = MyApp();
+
+class MyApp extends flutter.StatelessWidget {
+  @override
+  flutter.Widget build(flutter.BuildContext context) {
+    return flutter.MaterialApp(
+      title: 'Welcome to Flutter',
+      home: flutter.Scaffold(
+        appBar: flutter.AppBar(
+          title: flutter.Text('Welcome to Flutter'),
+        ),
+        body: flutter.Center(
+          child: flutter.Text('Hello World'),
+        ),
+      ),
+    );
+  }
+}
+-}
+
+myApp :: F.Widget
+myApp = F.stateless build unit
+  where
+    build _ _ = F.materialApp "Welcome to Hollowpoint" home
+    home = F.scaffold appbar body
+    appbar = F.appBar (F.text "Welcome to Hollowpoint")
+    body = F.center (F.text "Hello world!")
 
 data DataObject = DataObject
   { hello :: String
@@ -70,13 +100,14 @@ tryTCO x = if x < 0 then x else tryTCO (x - 1)
 
 main :: Effect Unit
 main = do
+  F.runApp myApp
   print $ (show >>> show >>> show) (DatumB 5 "Five" true)
   print $ show (Novelty "newness")
   print $ show Nullary
-  let object = { hello : "hello", world: "world" }
+  let object = { hello : "hiya", world: "globe" }
   print $ show object
   print $ show $ update object
-  let dataObject = DataObject { hello: "hello", world: object }
+  let dataObject = DataObject { hello: "ho there", world: object }
   print $ show dataObject
   print $ show $ updateDataObject dataObject
   let x = 5

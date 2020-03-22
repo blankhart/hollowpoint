@@ -218,6 +218,21 @@ pattern Ret e = Return (Just e)
 pattern Inline :: DartExpr -> DartExpr
 pattern Inline e = Annotation "pragma(\"vm:prefer-inline\")" e
 
+isFatArrowizable :: DartExpr -> Bool
+isFatArrowizable = \case
+  NumericLiteral{} -> True
+  StringLiteral{} -> True
+  ArrayLiteral{} -> True
+  Binary{} -> True
+  Unary{} -> True
+  FnDecl{} -> True
+  FnCall{} -> True
+  VarRef{} -> True
+  Accessor{} -> True
+  Ret{} -> True
+  Throw{} -> True
+  _ -> False
+
 -- recursion-schemes
 
 makeBaseFunctor ''DartExpr

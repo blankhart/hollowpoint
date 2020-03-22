@@ -282,6 +282,12 @@ Records could be represented as:
 * "Anonymous" classes implementing `abstract class`es for each property.
 * Concrete `class`es mixing in concrete `class`es for each property.
 
+A tricky point with `Map<Symbol, dynamic` is that the `Symbol` type requires the string to be a valid Dart identifier.  This shouldn't be a gating issue, however, as once wrapped in a `Symbol` the type is opaque and unrecoverable.  The only concern is ensuring that `String`s can be mapped uniquely into `Symbol`s without collision.  It shouldn't be necessary to recover the original `String` from the `Symbol` string.
+
+The important thing would then be to intercept calls to `reflectSymbol` within the compiler to substitute the original string.
+
+See [mapping `Map<String, dynamic>` to optional parameters](https://stackoverflow.com/questions/16688054/dart-named-parameters-using-a-map).
+
 ##### Variables
 
 Variables generally will be represented as `dynamic` unless full type annotations are undertaken.  It's unclear what benefits that would have for (i) performance, (ii) ease of writing Dart FFI, and (iii) interop from Dart.

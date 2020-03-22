@@ -116,9 +116,6 @@ let upstream =
 
 let overrides = {=}
 
-let additions = {
-    dart-print = ../std/print/spago.dhall as Location,
-    dart-flutter = ../std/flutter/spago.dhall as Location
-  }
+let additions = {=}
 
 in  upstream // overrides // additions

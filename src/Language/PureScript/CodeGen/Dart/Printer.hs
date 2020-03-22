@@ -25,15 +25,14 @@ import Numeric (showHex)
 printModule :: [DartExpr] -> Text
 printModule decls =
   renderStrict $ layoutPretty defaultLayoutOptions $ vsep $
-    "// ignore_for_file: dead_code, unused_import, unused_local_variable, omit_local_variable_types, top_level_function_literal_block"
+    "// ignore_for_file: avoid_init_to_null, dead_code, unused_import, unused_local_variable, non_constant_identifier_names, omit_local_variable_types, top_level_function_literal_block"
     : (semicolonize <$> decls)
 
 semicolonize :: DartExpr -> Doc ann
 semicolonize e = case e of
-  FnDecl _ _ inner -> case inner of
-    --  TODO: Fat arrows for literals, operators etc. not nested inside return blocks also would be statements
-    FnDecl{} -> statement
-    _ -> declaration
+  FnDecl _ _ inner
+    | isFatArrowizable inner -> statement
+    | otherwise -> declaration
   FnCall{} -> statement
   VarDecl{} -> statement
   VarAssign{} -> statement
@@ -98,12 +97,13 @@ instance Pretty DartExpr where
 
     -- TODO: Integrate with AST pass that converts single-expression functions
     -- into lambdas.
-    FnDecl fn args body ->
-      pretty fn <> uncurriedArgs args <+> pretty arrow <+> pretty body
+    FnDecl fn args body
+      | isFatArrowizable body ->
+          name $ uncurriedArgs args <> " => " <> pretty body
+      | otherwise ->
+          name $ uncurriedArgs args <> pretty body
       where
-        arrow = case body of
-          FnDecl{} -> Just ("=>" :: Text)
-          _ -> Nothing
+        name = maybe ("" <>) (\n -> (pretty n <+>)) fn
 
     FnCall fn args ->
       pretty fn <> uncurriedArgs args

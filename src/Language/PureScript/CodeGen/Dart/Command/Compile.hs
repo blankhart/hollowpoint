@@ -105,8 +105,8 @@ compile opts@CommandLineOptions{..} = runShake $ do
     pubspec =
       cloPackageDir </> "pubspec" <.> "yaml"
 
-  --  TODO: Instead liftIO $ newCacheIO () with a unit key
-  --  Or use newCache so that compilation depends on the contents of the PureScript output directory.
+  --  TODO: Instead liftIO $ newCacheIO () with a unit key?
+  --  Or use newCache so that compilation depends on the contents of the PureScript output directory for spago-watch?
   ref <- liftIO $ IORef.newIORef (InMemFileMap mempty mempty mempty mempty)
 
   action $ do
@@ -191,15 +191,23 @@ compile opts@CommandLineOptions{..} = runShake $ do
     unless hasPubSpec $ do
       putInfo $ "Generating pubspec.yaml in " <> cloPackageDir <> "..."
       need [pubspec]
-      putInfo $ "Running pub get from " <> cloPackageDir <> "..."
-      command_ [Cwd cloPackageDir] "pub" ["get"]
+      putInfo $ "Running flutter create from " <> cloPackageDir <> "..."
+      -- FIXME: Assumes cloPackageDir ends in cloPackageName.
+      -- Fix by taking last directory
+      -- NOTE: This will run `flutter pub get` and fix missing files.
+      command_ [Cwd $ cloPackageDir </> ".."] "flutter" ["create", cloPackageName]
+--      putInfo $ "Running flutter pub get from " <> cloPackageDir <> "..."
+--      command_ [Cwd cloPackageDir] "flutter" ["pub", "get"]
+--      putInfo $ "Running pub get from " <> cloPackageDir <> "..."
+--      command_ [Cwd cloPackageDir] "pub" ["get"]
 
     when cloRun $ case cloMain of
       Nothing ->
         putInfo "Error: Specifying --run also requires --main-is."
       Just mn -> do
         putInfo $ "Running binary compiled from " <> mn
-        command_ [Cwd $ cloPackageDir </> ".."] "dart" [dartBinaryFileName mn]
+--        command_ [Cwd $ cloPackageDir </> ".."] "dart" [dartBinaryFileName mn]
+        command_ [Cwd cloPackageDir] "flutter" ["run", dartBinaryFileName mn]
 
   let
     assertValidModuleName filename = fromMaybe $ internalError $
@@ -257,13 +265,21 @@ compile opts@CommandLineOptions{..} = runShake $ do
   pubspec %> \outputPath -> do
     writeFileChanged outputPath $ unlines
       [ "name: " <> cloPackageName
-      , ""
+      , "version: 1.0.0+1"
       , "environment:"
       , "  sdk: '>=2.7.0 <3.0.0'"
       , ""
+      , "dependencies:"
+      , "  flutter:"
+      , "    sdk: flutter"
+      , "  cupertino_icons: ^0.1.2"
       , "dev_dependencies:"
---      , "  build_runner: ^1.6.0"
---      , "  build_web_compilers: ^2.3.0"
+      , "  flutter_test:"
+      , "    sdk: flutter"
+--      , "  build_runner: ^1.6.0" -- webdev
+--      , "  build_web_compilers: ^2.3.0" -- webdev
+      , "flutter:"
+      , "  uses-material-design: true"
       ]
 
   {-
@@ -303,6 +319,6 @@ loadModuleFromJSON text =
     value = fromMaybe (internalError "Found ill-formatted CoreFn JSON.") $
       A.decode . L.encodeUtf8 $ L.fromStrict text
 
--- TODO: Robust exceptions
+-- TODO: More robust error reporting
 internalError :: Text -> a
 internalError = error . T.unpack
