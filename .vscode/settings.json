@@ -17,7 +17,7 @@
     "**/.hollowpoint": true,
     "**/.dart_tool": true,
     "**/.idea": true,
-    "**/.packages": true,
+    "**/.packages": false,
     "**/android": true,
     "**/*.iml": true,
     "**/ios": true,

@@ -20,7 +20,7 @@ tmp/
 **/.hollowpoint/
 **/.idea/
 **/.metadata
-**/.packages/
+**/.packages
 **/output
 **/target/
 **/android/
