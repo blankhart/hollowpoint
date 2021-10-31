@@ -1,0 +1,15 @@
+.hollowpoint/
+**/.cache/
+**/.code-workspace
+**/dist
+**/generated-docs/
+**/node_modules/
+**/.psa*
+**/.psc-package/
+**/.psc*
+**/.pulp-cache/
+**/.purs*
+**/.spago
+src/**/*.js
+**/.vscode
+**/yarn-error.log
