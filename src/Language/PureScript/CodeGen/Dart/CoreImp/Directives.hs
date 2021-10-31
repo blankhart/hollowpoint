@@ -2,36 +2,15 @@ module Language.PureScript.CodeGen.Dart.CoreImp.Directives where
 
 import Protolude (ordNub)
 
-import Control.Monad (forM, replicateM, void)
-import Control.Monad.Except (MonadError, throwError)
-import Control.Monad.Reader (MonadReader, asks)
-import Control.Monad.Supply (evalSupply)
-import Control.Monad.Supply.Class
-
-import Data.Foldable (foldl')
 import Data.List ((\\))
-import qualified Data.Foldable as F
-import qualified Data.Map as M
-import qualified Data.Set as S
-import Data.Maybe (fromMaybe)
-import Data.String (fromString)
-import Data.Text (Text)
 import qualified Data.Text as T
 
-import qualified Language.PureScript.Constants as C
-import Language.PureScript.CoreFn
-import Language.PureScript.Crash
-import Language.PureScript.Errors (ErrorMessageHint(..), SimpleErrorMessage(..),
-                                   MultipleErrors(..), rethrow, errorMessage,
-                                   errorMessage', rethrowWithPosition, addHint)
+import qualified Language.PureScript.Constants.Prim as C
 import Language.PureScript.Names
-import Language.PureScript.Traversals (sndM)
 
 import Language.PureScript.CodeGen.Dart.Ident
 import qualified Language.PureScript.CodeGen.Dart.CoreImp.AST as D
 import Language.PureScript.CodeGen.Dart.CoreImp.AST (DartExpr)
-
-import System.FilePath.Posix ((</>))
 
 --  TODO: Implement more Dart-idiomatic renaming scheme that eliminates unnecessary characters and avoids a clash with module names.
 

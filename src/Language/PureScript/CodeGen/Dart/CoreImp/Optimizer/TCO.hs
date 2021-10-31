@@ -1,11 +1,9 @@
 module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.TCO where
 
-import Prelude.Compat
-
 import Debug.Trace
 
 import Data.Monoid (Sum(..))
-import qualified Language.PureScript.Constants as C
+import qualified Language.PureScript.Constants.Prim as C
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
 import Language.PureScript.CodeGen.Dart.Ident
 import Safe (headDef, tailSafe)
@@ -35,7 +33,7 @@ tco = everywhere convert where
       | isTailRecursive name body' ->
           replace (toLoop name outerArgs innerArgs body')
       | name == DartIdent "tryTCO" ->
-          trace ("Investigated, but not tail recursive: " <> show name <> "\n\t" <> show body' <> "\n\t" <> show (countSelfReferences name body') <> show (allInTailPosition name body')) $
+          trace ("Investigated, but not tail recursive: " <> show name <> "\n\t" <> show body' <> "\n\t" <> show (countSelfReferences name body') <> show (allInTailPosition name body'))
           fn
       | otherwise -> fn
       where
@@ -73,33 +71,35 @@ tco = everywhere convert where
     [ Var tcoDone (BooleanLiteral False)
     , Var tcoResult (VarRef "null") -- Empty initializer
     , FnDecl (Just tcoLoop) (outerArgs ++ innerArgs) (Block [loopify js])
-    , While (Unary Not (VarRef tcoDone)) $ Block $
-        [(VarAssign
+    , While (Unary Not (VarRef tcoDone)) $ Block
+        [VarAssign
           (VarRef tcoResult)
           (FnCall
             (VarRef tcoLoop)
-            ( (map (VarRef . tcoVar) outerArgs)
-              ++ (map (VarRef . copyVar) innerArgs)
+            ( map (VarRef . tcoVar) outerArgs
+              ++ map (VarRef . copyVar) innerArgs
             )
           )
-        )]
+        ]
     , Return (Just (VarRef tcoResult))
     ]
 
     where
 
     loopify :: DartExpr -> DartExpr
-    loopify (Return val) = case val of
+    loopify (Return value) = case value of
       Just ret
         | isSelfCall ident ret ->
           let
             allArgumentValues = concat $ collectArgs [] ret
           in
             Block $
-              zipWith (\val arg ->
-                VarAssign (VarRef (tcoVar arg)) val) allArgumentValues outerArgs
-              ++ zipWith (\val arg ->
-                VarAssign (VarRef (copyVar arg)) val) (drop (length outerArgs) allArgumentValues) innerArgs
+              zipWith
+                (\val arg -> VarAssign (VarRef (tcoVar arg)) val)
+                allArgumentValues outerArgs
+              ++ zipWith
+                (\val arg -> VarAssign (VarRef (copyVar arg)) val)
+                (drop (length outerArgs) allArgumentValues) innerArgs
               ++ [ Return Nothing ]
         | otherwise -> Block [ markDone, Return (Just ret) ]
       Nothing ->

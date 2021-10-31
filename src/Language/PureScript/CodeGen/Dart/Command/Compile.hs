@@ -7,40 +7,25 @@
 
 module Language.PureScript.CodeGen.Dart.Command.Compile (compile) where
 
-import qualified Debug.Trace as Debug
-
-import           Control.Applicative
 import           Control.Monad
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
-import Data.Aeson.Casing (snakeCase)
-import           Data.Bool (bool)
-import qualified Data.ByteString.Lazy.UTF8 as LBU8
-import Data.Foldable (foldl', for_)
 import qualified Data.IORef as IORef
-import           Data.List (intercalate, stripPrefix)
-import           Data.List.Split (splitOn)
-import Data.Maybe (catMaybes, fromMaybe, isJust)
+import           Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import qualified Data.Map as M
-import qualified Data.Set as S
 import Data.Text (Text)
 
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy as L
 import qualified Data.Text.Lazy.Encoding as L
 
-import           Data.Traversable (for)
 import           Development.Shake
 import           Development.Shake.FilePath
-import Language.PureScript (runModuleName)
+
 import Language.PureScript.CoreFn
 import Language.PureScript.CoreFn.FromJSON
-import           System.Exit (exitSuccess, exitFailure)
-import           System.Directory (getCurrentDirectory)
 import           System.FilePath.Glob (glob)
-import           System.IO (hClose, hPutStr, hPutStrLn, openFile, IOMode(..), stderr)
-import           System.IO.UTF8 (readUTF8FilesT)
 
 import qualified Language.PureScript.CodeGen.Dart.CoreImp as Dart
 import qualified Language.PureScript.CodeGen.Dart.Printer as Dart
@@ -58,12 +43,14 @@ runShake = shake shakeOptions
   }
 
 -- For now assume in the form Data/Ord.dart
-psifyModuleName :: FilePath -> String
-psifyModuleName =
-    foldl' (\a b -> a <> "." <> b) ""
-  . splitOn "/"
-  . dropDirectory1 -- remove package name ("prelude/")
-  . dropExtension -- remove extension (".dart")
+{-
+  psifyModuleName :: FilePath -> String
+  psifyModuleName =
+      foldl' (\a b -> a <> "." <> b) ""
+    . splitOn "/"
+    . dropDirectory1 -- remove package name ("prelude/")
+    . dropExtension -- remove extension (".dart")
+-}
 
 data InMemFileMap = InMemFileMap
   { filemapDartSources :: M.Map String FilePath
@@ -141,9 +128,9 @@ compile opts@CommandLineOptions{..} = runShake $ do
         fmap (\mn -> (dartOutputFileName mn, mn)) pursModuleNames
 
       -- Map (module name, dart source)
-      dartSources = foldl' insertSourceName mempty pursModuleNames
-        where
-          insertSourceName acc mn = M.update (const (findSourceName mn)) mn acc
+      -- dartSources = foldl' insertSourceName mempty pursModuleNames
+      --  where
+      --    insertSourceName acc mn = M.update (const (findSourceName mn)) mn acc
 
       -- Map (module name, dart source) assuming PureScript file format
       dartSourcesPursFormat = M.fromList $
@@ -156,10 +143,10 @@ compile opts@CommandLineOptions{..} = runShake $ do
       --       and intersect the result with observed file paths
       -- NOTE: There is no invertible mapping from Dart sources to module names
       --       in this format due to case insensitivity.
-      dartSourcesDartFormat = M.fromList []
+      -- dartSourcesDartFormat = M.empty
 
-      findSourceName mn =
-        M.lookup mn dartSourcesPursFormat <|> M.lookup mn dartSourcesDartFormat
+      -- findSourceName mn =
+      --  M.lookup mn dartSourcesPursFormat <|> M.lookup mn dartSourcesDartFormat
 
       dartBinaries = case cloMain of
         Nothing -> mempty
@@ -186,12 +173,12 @@ compile opts@CommandLineOptions{..} = runShake $ do
       Just mn -> need [dartBinaryFileName mn]
 
     -- If not present, generate a `pubspec.yaml` and run `pub get`
-    -- TODO: Make these opt-in or -out through command line switches
+    -- TODO: Make these opt-in or opt-out through command line switches
     hasPubSpec <- doesFileExist pubspec
     unless hasPubSpec $ do
-      putInfo $ "Generating pubspec.yaml in " <> cloPackageDir <> "..."
+      putInfo $ "Generating `pubspec.yaml` in " <> cloPackageDir <> "..."
       need [pubspec]
-      putInfo $ "Running flutter create from " <> cloPackageDir <> "..."
+      putInfo $ "Running `flutter create` from " <> cloPackageDir <> "..."
       -- FIXME: Assumes cloPackageDir ends in cloPackageName.
       -- Fix by taking last directory
       -- NOTE: This will run `flutter pub get` and fix missing files.
@@ -211,9 +198,9 @@ compile opts@CommandLineOptions{..} = runShake $ do
 
   let
     assertValidModuleName filename = fromMaybe $ internalError $
-      "No module associated with " <> (T.pack filename)
+      "No module associated with " <> T.pack filename
     assertValidSourceName mn = fromMaybe $ internalError $
-      "No source associated with " <> (T.pack mn)
+      "No source associated with " <> T.pack mn
 
   pursOutputFileNames %> \outputPath -> do
 
@@ -230,7 +217,7 @@ compile opts@CommandLineOptions{..} = runShake $ do
     let
       modCoreFn = loadModuleFromJSON jsonText
       ffiSourceFileName = M.lookup mn filemapDartSources
-      ffiTargetFileName = (const $ dartOutputFileName mn) <$> ffiSourceFileName
+      ffiTargetFileName = dartOutputFileName mn <$ ffiSourceFileName
       ffiRequired = not . null $ moduleForeign modCoreFn
 
     -- TODO:  List input directories searched on failure.

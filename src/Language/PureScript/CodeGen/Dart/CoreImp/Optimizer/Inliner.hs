@@ -1,21 +1,17 @@
 module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Inliner where
 
-import Prelude.Compat
-
 import Control.Monad.Supply.Class (MonadSupply, freshName)
 
 import Data.Either (rights)
 import Data.Foldable (foldl')
-import Data.Maybe (fromMaybe)
-import Data.String (IsString, fromString)
+import Data.String (IsString)
 import Data.Text (Text)
-import qualified Data.Text as T
 
 import Language.PureScript.PSString (PSString)
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
 import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Common (isDict, isDict', isReassigned, isRebound, isUpdated, removeFromBlock, replaceIdent, replaceIdents)
 import Language.PureScript.CodeGen.Dart.Ident
-import qualified Language.PureScript.Constants as C
+import qualified Language.PureScript.Constants.Prelude as C
 
 collapseExpressionBlocks :: DartExpr -> DartExpr
 collapseExpressionBlocks = everywhere $ \case
@@ -60,7 +56,7 @@ etaConvert = everywhere $ \case
   --  NOTE: How does this work with curried functions.
   Block [Ret (FnCall (FnDecl Nothing idents block@(Block body)) args)]
     | all shouldInline args &&
-      not (any (`isRebound` block) (map VarRef idents)) &&
+      not (any ((`isRebound` block) . VarRef) idents) &&
       not (any (`isRebound` block) args)
       -> Block (map (replaceIdents (zip idents args)) body)
   -- Parameterless function that simply calls parameterless function
@@ -151,13 +147,13 @@ inlineFnComposition = everywhereTopDownM $ \case
         name = fromAnyName a
 
     mkApp :: Either DartExpr (Text, DartExpr) -> DartExpr
-    mkApp = either id $ \(name, arg) -> VarRef (fromAnyName name)
+    mkApp = either id $ \(name, _) -> VarRef (fromAnyName name)
 
     goApps :: DartExpr -> m [Either DartExpr (Text, DartExpr)]
     goApps (FnCall (FnCall (FnCall fn [dict']) [x]) [y])
       | isFnCompose dict' fn = mappend <$> goApps x <*> goApps y
       | isFnComposeFlipped dict' fn = mappend <$> goApps y <*> goApps x
-    goApps app@(FnCall{}) = pure . Right . (,app) <$> freshName
+    goApps app@FnCall{} = pure . Right . (,app) <$> freshName
     goApps other = pure [Left other]
 
     isFnCompose :: DartExpr -> DartExpr -> Bool
@@ -209,7 +205,7 @@ inlineCommonValues = everywhere $ \case
   expr -> expr
 
 inlineCommonOperators :: DartExpr -> DartExpr
-inlineCommonOperators = everywhereTopDown $ foldl' (.) id $
+inlineCommonOperators = everywhereTopDown $ foldl' (.) id
   [ binary semiringNumber opAdd Add
   , binary semiringNumber opMul Multiply
 

@@ -6,21 +6,17 @@ module Language.PureScript.CodeGen.Dart.CoreImp
 
 -- import Debug.Trace
 
-import Protolude (for, ordNub)
+import Protolude (for, runIdentity)
 
-import Control.Monad (forM, replicateM, void)
-import Control.Monad.Except (MonadError, throwError)
-import Control.Monad.Reader (MonadReader, asks)
-import Control.Monad.Supply (evalSupply)
+import Control.Monad (forM, replicateM)
+import Control.Monad.Supply (evalSupplyT)
 import Control.Monad.Supply.Class
 
-import Data.Foldable (foldl')
 import Data.Maybe (fromMaybe)
 import Data.String (fromString)
-import Data.Text (Text)
 import qualified Data.Text as T
 
-import qualified Language.PureScript.Constants as C
+import qualified Language.PureScript.Constants.Prim as C
 import Language.PureScript.CoreFn
 import Language.PureScript.Crash
 import Language.PureScript.Names
@@ -35,23 +31,21 @@ import Language.PureScript.CodeGen.Dart.CoreImp.AST (DartExpr)
 import Language.PureScript.CodeGen.Dart.CoreImp.Directives
 import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer
 
-import System.FilePath.Posix ((</>))
-
 fromModule :: Dart.CommandLineOptions -> String -> String -> Module Ann -> [DartExpr]
 fromModule
-  CommandLineOptions{..}
+  CommandLineOptions{}
   packageName
   libraryPrefix
-  (Module _ comments mn _ imports exports foreigns bindings)
-  = evalSupply 0 $ do
+  Module {..}
+  = runIdentity $ evalSupplyT 0 $ do
     let
       foreignDecls =
-        if null foreigns
+        if null moduleForeign
           then []
-          else getForeignDirectives packageName libraryPrefix mn
+          else getForeignDirectives packageName libraryPrefix moduleName
       importDecls =
-        getImportDirectives packageName libraryPrefix mn (snd <$> imports)
-    optDecls <- fromDecls mn True bindings
+        getImportDirectives packageName libraryPrefix moduleName (snd <$> moduleImports)
+    optDecls <- fromDecls moduleName True moduleDecls
     return $ concat [foreignDecls, importDecls, optDecls]
 
 -- | CoreFn to Dart IR
@@ -66,16 +60,16 @@ fromDecls mn cloStripComments bindings = do
   fromBinding :: Bind Ann -> m [DartExpr]
   fromBinding = \case
     NonRec _ ident expr -> return <$> fromNonRec ident expr
-    Rec bindings -> forM bindings $ \((_, ident), expr) -> fromNonRec ident expr
+    Rec bindings_ -> forM bindings_ $ \((_, ident), expr) -> fromNonRec ident expr
 
   fromNonRec :: Ident -> Expr Ann -> m DartExpr
   -- Commented declaration
   fromNonRec i = \case
     -- Comment
     e@(extractAnn -> (_, com, _, _)) | not (null com) ->
-      case cloStripComments of
-        True -> fromNonRec i uncommented
-        False -> D.Comment com <$> fromNonRec i uncommented
+      if cloStripComments
+        then fromNonRec i uncommented
+        else D.Comment com <$> fromNonRec i uncommented
       where
         uncommented = modifyAnn removeComments e
 
@@ -105,7 +99,7 @@ fromDecls mn cloStripComments bindings = do
         )
 
     e -> fromExpr e >>= \case
-      decl@(D.ClassDecl{}) -> return decl
+      decl@D.ClassDecl{} -> return decl
       expr -> return $ D.Val (fromIdent i) expr
 
   fromExpr :: Expr Ann -> m DartExpr
@@ -197,8 +191,8 @@ fromDecls mn cloStripComments bindings = do
 
     -- NOTE: Dart syntax requires the IIFE because it prohibits
     -- returning an anonymous block containing a return value.
-    Let _ bindings expr -> do
-      decls <- concat <$> mapM fromBinding bindings
+    Let _ bindings_ expr -> do
+      decls <- concat <$> mapM fromBinding bindings_
       ret <- fromExpr expr
       return $ D.IIFE [] (decls ++ [D.Ret ret])
 
@@ -231,7 +225,7 @@ fromDecls mn cloStripComments bindings = do
 
   fromQualified :: (a -> DartIdent) -> Qualified a -> DartExpr
   fromQualified f (Qualified q a) = case q of
-    Just (ModuleName [ProperName mn']) | mn' == C.prim ->
+    Just (ModuleName mn') | mn' == C.prim ->
       D.VarRef (f a)
     Just mn' | mn /= mn' ->
       D.ObjectAccessor (f a) (D.VarRef (fromModuleName mn'))

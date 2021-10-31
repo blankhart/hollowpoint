@@ -1,21 +1,19 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 module Language.PureScript.CodeGen.Dart.Printer (printModule) where
 
-import Control.Monad (forM, mzero)
-
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc
-import Data.Text.Prettyprint.Doc.Render.Text
+import Prettyprinter
+import Prettyprinter.Render.Text ( renderStrict )
 import Data.Word (Word16)
 
-import Language.PureScript.Comments
-import Language.PureScript.Crash
-import qualified Language.PureScript.Pretty.Common as P
-import Language.PureScript.PSString (PSString, decodeString, toUTF16CodeUnits)
+import Language.PureScript.Comments ( Comment(..) )
+import Language.PureScript.PSString (PSString, toUTF16CodeUnits)
 
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
 import Language.PureScript.CodeGen.Dart.Ident
+    ( DartIdent(runDartIdent) )
 
 import Numeric (showHex)
 
@@ -64,9 +62,7 @@ instance Pretty DartExpr where
     StringLiteral ps ->
       pretty ps
 
-    BooleanLiteral b -> case b of
-      True -> "true"
-      False -> "false"
+    BooleanLiteral b -> if b then "true" else "false"
 
     ArrayLiteral es ->
       -- TODO: Break across lines in appropriate cases
@@ -74,7 +70,7 @@ instance Pretty DartExpr where
 
     RecordLiteral kvs -> case kvs of
       [] -> "{}"
-      ps -> braces $ align $ vsep $ punctuate comma $ assign <$> kvs
+      _ -> braces $ align $ vsep $ punctuate comma $ assign <$> kvs
       where
         assign (key, value) = pretty key <+> ":" <+> pretty value
 
@@ -83,8 +79,8 @@ instance Pretty DartExpr where
       where
         bodyDecls =
           fieldDecls ++ [ctorDecl, createDecl]
-        fieldOuts =
-          fmap pretty fields
+        -- fieldOuts =
+        --  fmap pretty fields
         fieldDecls =
           fmap (\f -> "final dynamic" <+> pretty f <> ";") fields
         ctorDecl =
@@ -166,6 +162,8 @@ instance Pretty DartExpr where
     Annotation ann e ->
       "@" <> pretty ann <> line <> pretty e
 
+    _ -> error "internal error"
+
 instance Pretty UnaryOperator where
   pretty op = pretty (t :: Text) where
     t = case op of
@@ -224,9 +222,9 @@ instance Pretty PSString where
       encodeChar c = T.singleton $ toChar c
 
       showHex' :: Enum a => Int -> a -> Text
-      showHex' width c =
+      showHex' width_ c =
         let hs = showHex (fromEnum c) "" in
-        T.pack (replicate (width - length hs) '0' <> hs)
+        T.pack (replicate (width_ - length hs) '0' <> hs)
 
       toChar :: Word16 -> Char
       toChar = toEnum . fromIntegral

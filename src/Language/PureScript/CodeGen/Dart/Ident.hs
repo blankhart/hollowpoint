@@ -2,7 +2,6 @@
 
 module Language.PureScript.CodeGen.Dart.Ident where
 
-import Data.Char
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -48,8 +47,11 @@ toDartFilePath =
 
 -- Data.BigThing -> _$Data_BigThing
 fromModuleName :: ModuleName -> DartIdent
-fromModuleName (ModuleName pns) = DartIdent $
-  "_$" <> T.intercalate "_" (runProperName `map` pns)
+fromModuleName (ModuleName pns) = DartIdent $ "_$" <> T.map sep pns
+  where
+    sep = \case
+      '.' -> '_'
+      c -> c
 
 toTargetFileName :: DartDir -> FilePath -> FilePath -> DartBaseFile -> String -> FilePath
 toTargetFileName dir packageDir libraryPrefix baseName moduleName =
@@ -116,11 +118,11 @@ identCharToText c = T.singleton c
 
 -- | Checks whether an identifier name is reserved in JavaScript.
 isReserved :: Text -> Bool
-isReserved name = elem name []
+isReserved name = name `elem` []
 
 -- | Checks whether a name matches a built-in value in JavaScript.
 isBuiltIn :: Text -> Bool
-isBuiltIn name = elem name
+isBuiltIn name = name `elem`
   [ "abstract"
   , "dynamic"
   , "implements"

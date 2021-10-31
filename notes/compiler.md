@@ -378,23 +378,6 @@ Disable static analysis through a file-by-file notation or an `analysis.yaml` fi
 
 The Dart backend should report some errors, but can rely on the Dart analyzer to report errors and warnings for some things after code generation has occurred.  For example, it is an error if the backend needs a foreign file that it cannot find.  But if the foreign file is missing implementations of functions used elsewhere in the codebase, the Dart analyzer will pick these up.
 
-{-
-
-  --  These should be run only when the PureScript output has changed, i.e. when there has been a change to:
-  --  * The `CoreFn` output for a PureScript module.
-  --  * The Dart FFI file corresponding to a PureScript module.
-    -- load from text
-    -- Equivalent of inferForeignModules/checkForeignDecls
-    -- verify if module has foreign bindings
-    -- if it has a foreign file, need the foreign file
-    -- * if not found but needed, raise an error
-    -- * if found but not needed, raise a warning
-    -- verify that the foreign file has the necessary Dart declarations
-    -- * if any missing, specify which
-    -- if foreign file is found and validated, pass the path to compiler
-
--}
-
 The compiler has a utility function [`identCharToText`](https://github.com/purescript/purescript/blob/91886cbf94fb3fa5219fcdc64dd8e189779f51e1/src/Language/PureScript/CodeGen/JS/Common.hs#L62) to convert a variety of symbols to human readable forms. But from that list, only the prime and the underscore seem to be valid characters in an identifier.  For example, it's not clear how a tilde would appear in an identifier, unless it was put there by an earlier compiler pass as happens in some cases with the dollar sign (e.g., `$__unused`). Operators can use these symbols, but must have user-supplied human readable aliases in any case.
 
 Dart name collisions possible if typeclasses and data constructors have different namespaces, but that would also be the case for JavaScript where both are functions.

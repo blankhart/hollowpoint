@@ -2,8 +2,6 @@ module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer (
   optimize
 ) where
 
-import Prelude.Compat
-
 import Control.Monad ((>=>))
 import Control.Monad.Supply.Class (MonadSupply)
 import Data.Foldable (foldl')

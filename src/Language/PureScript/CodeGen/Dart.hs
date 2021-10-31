@@ -4,7 +4,7 @@ import Options.Applicative (execParser)
 
 import Language.PureScript.CodeGen.Dart.Command.Compile (compile)
 import Language.PureScript.CodeGen.Dart.Command.Options (cliParser)
-import Language.PureScript.CodeGen.Dart.Version (versionString)
+-- import Language.PureScript.CodeGen.Dart.Version (versionString)
 
 main :: IO ()
 main = do

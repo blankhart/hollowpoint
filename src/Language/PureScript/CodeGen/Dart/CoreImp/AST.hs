@@ -7,18 +7,13 @@
 -- | Data types for the imperative core Dart AST
 module Language.PureScript.CodeGen.Dart.CoreImp.AST where
 
-import Prelude.Compat
+import Control.Monad ( (<=<))
 
-import Control.Monad ((>=>), (<=<))
-import Control.Monad.Identity (Identity(..), runIdentity)
-
-import Data.Foldable (fold)
 import Data.Functor.Foldable hiding (fold)
 import Data.Functor.Foldable.TH
 import Data.Text (Text)
 
 import Language.PureScript.Comments
-import Language.PureScript.Traversals
 import Language.PureScript.PSString (PSString)
 
 import Language.PureScript.CodeGen.Dart.Ident
@@ -252,4 +247,4 @@ everywhereTopDownM f =
 
 everything :: Monoid r => (DartExpr -> r) -> DartExpr -> r
 everything f =
-  para $ \e -> (f . embed . fmap fst) e <> fold (fmap snd e)
+  para $ \e -> (f . embed . fmap fst) e <> foldMap snd e

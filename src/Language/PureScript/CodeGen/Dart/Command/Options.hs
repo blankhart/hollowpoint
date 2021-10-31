@@ -6,11 +6,6 @@ import Options.Applicative
 
 import Language.PureScript.CodeGen.Dart.Version (versionString)
 
-import Prelude.Compat
-import qualified Data.Set as S
-import Data.Map (Map)
-import qualified Data.Map as Map
-
 -- Additional options:
 -- * Regenerate all
 -- * Require/read existing pubspec.yaml

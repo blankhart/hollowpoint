@@ -1,10 +1,7 @@
 module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Unused where
 
-import Prelude.Compat
-
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
 import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Common
-import qualified Language.PureScript.Constants as C
 
 removeCodeAfterReturnStatements :: DartExpr -> DartExpr
 removeCodeAfterReturnStatements = everywhere (removeFromBlock go)

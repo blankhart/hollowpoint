@@ -1,18 +1,14 @@
 module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.MagicDo where
 
-import Prelude.Compat
-import Protolude (ordNub)
-
 import Debug.Trace
 
-import Data.Maybe (fromJust, isJust)
 import Data.Text (Text)
 
 import Language.PureScript.PSString
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
 import Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Common (isDict)
 import Language.PureScript.CodeGen.Dart.Ident
-import qualified Language.PureScript.Constants as C
+import qualified Language.PureScript.Constants.Prelude as C
 
 -- | Inline type class dictionaries for >>= and return for the Eff monad
 --
@@ -38,30 +34,30 @@ magicDo effectModule C.EffectDictionaries{..} = everywhereTopDown convert
   -- Desugar monomorphic calls to >>= and return for the Eff monad
   convert :: DartExpr -> DartExpr
   -- Desugar pure
-  convert expr@(FnCall (FnCall pure' [val]) [])
+  convert (FnCall (FnCall pure' [val]) [])
     | isPure pure' =
 --        trace ("Desugar pure match on " <> show expr) $
         val
   -- Desugar discard
   -- TODO: Focus attention here
   -- TODO: Shouldn't the next one take an unused parameter?  Maybe the issue is that other optimizations run first in the PS version.  Verify this works together with removeNullApp.
-  convert expr@(FnCall (FnCall bind [m]) [FnDecl Nothing [_] (Block js)])
+  convert (FnCall (FnCall bind [m]) [FnDecl Nothing [_] (Block js)])
     | isDiscard bind =
 --        trace ("Desugar discard match on " <> show expr) $
         FnDecl Nothing [] $ Block (FnCall m [] : map applyReturns js )
   -- Desugar bind to wildcard
-  convert expr@(FnCall (FnCall bind [m]) [FnDecl Nothing [_] (Block js)])
+  convert (FnCall (FnCall bind [m]) [FnDecl Nothing [_] (Block js)])
     | isBind bind =
 --        trace ("Desugar bind to wildcard match on " <> show expr) $
         FnDecl Nothing [] $ Block (FnCall m [] : map applyReturns js )
   -- Desugar bind
-  convert expr@(FnCall (FnCall bind [m]) [FnDecl Nothing [arg] (Block js)])
+  convert (FnCall (FnCall bind [m]) [FnDecl Nothing [arg] (Block js)])
     | isBind bind =
 --        trace ("Desugar bind match on " <> show expr) $
         FnDecl Nothing [] $
-          Block ((Val arg (FnCall m [])) : map applyReturns js)
+          Block (Val arg (FnCall m []) : map applyReturns js)
   -- Desugar untilE
-  convert expr@(FnCall (FnCall f [arg]) [])
+  convert (FnCall (FnCall f [arg]) [])
     | isEffFunc edUntil f =
 --        trace ("Desugar untilE match on " <> show expr) $
         FnCall
@@ -75,7 +71,7 @@ magicDo effectModule C.EffectDictionaries{..} = everywhereTopDown convert
           )
           []
   -- Desugar whileE
-  convert expr@(FnCall (FnCall (FnCall f [arg1]) [arg2]) [])
+  convert (FnCall (FnCall (FnCall f [arg1]) [arg2]) [])
     | isEffFunc edWhile f =
 --        trace ("Double applications match on " <> show expr) $
         FnCall
@@ -99,7 +95,7 @@ magicDo effectModule C.EffectDictionaries{..} = everywhereTopDown convert
           body
   -}
   -- Inline double applications
-  convert expr@(FnCall (FnCall (FnDecl Nothing [] (Block body)) []) []) =
+  convert (FnCall (FnCall (FnDecl Nothing [] (Block body)) []) []) =
 --    trace ("Double applications match on " <> show expr) $
       FnCall (FnDecl Nothing [] (Block (applyReturns `fmap` body))) []
   convert other =
@@ -115,7 +111,7 @@ magicDo effectModule C.EffectDictionaries{..} = everywhereTopDown convert
     | isDict (C.controlBind, C.discardUnitDictionary) dict1 &&
       isDict (effectModule, edBindDict) dict2 &&
       isDiscardPoly fn = True
-    | otherwise = trace ("Discard check: " <> show expr) $ False
+    | otherwise = trace ("Discard check: " <> show expr) False
   isDiscard _ = False
   -- Check if an expression represents a monomorphic call to pure or return for the Eff applicative
   isPure (FnCall fn [dict])
@@ -132,7 +128,7 @@ magicDo effectModule C.EffectDictionaries{..} = everywhereTopDown convert
   isEffFunc :: PSString -> DartExpr -> Bool
   isEffFunc name = \case
     ObjectAccessor name' (VarRef eff) ->
-      (runDartIdent eff) == ("_$" <> effectModule)
+      runDartIdent eff == ("_$" <> effectModule)
         && decodeString name == Just (runDartIdent name')
     _ -> False
 

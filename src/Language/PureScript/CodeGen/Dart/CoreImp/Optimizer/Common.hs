@@ -1,9 +1,6 @@
 module Language.PureScript.CodeGen.Dart.CoreImp.Optimizer.Common where
 
-import Prelude.Compat
-
 import Data.Text (Text)
-import Data.List (foldl')
 import Data.Maybe (fromMaybe)
 import Data.Monoid (Any(..))
 
@@ -11,8 +8,6 @@ import Language.PureScript.Crash
 import Language.PureScript.CodeGen.Dart.CoreImp.AST
 import Language.PureScript.CodeGen.Dart.Ident
 import Language.PureScript.PSString (PSString, decodeString)
-
-import Debug.Trace
 
 replaceIdent :: DartIdent -> DartExpr -> DartExpr -> DartExpr
 replaceIdent var1 js = everywhere replace
